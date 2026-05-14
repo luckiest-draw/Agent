@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: agent-postgres
+    environment:
+      POSTGRES_DB: agent_platform
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: agent123
+    ports:
+      - "5432:5432"
+    volumes:
+      - D:/Pgvector/data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: agent-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: agent-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: agent
+      RABBITMQ_DEFAULT_PASS: agent123
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
