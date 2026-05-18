@@ -1,8 +1,12 @@
-# Maven
+# ===== Maven =====
 target/
 !.mvn/wrapper/maven-wrapper.jar
 
-# STS / Eclipse
+# ===== IDE =====
+.idea/
+*.iws
+*.iml
+*.ipr
 .apt_generated
 .classpath
 .factorypath
@@ -10,24 +14,14 @@ target/
 .settings
 .springBeans
 .sts4-cache
-
-# IntelliJ IDEA
-.idea/
-*.iws
-*.iml
-*.ipr
-
-# NetBeans
+.vscode/
 /nbproject/private/
 /nbbuild/
 /dist/
 /nbdist/
 /.nb-gradle/
 
-# VS Code
-.vscode/
-
-# Java
+# ===== Java =====
 *.class
 *.jar
 *.war
@@ -39,6 +33,30 @@ target/
 hs_err_pid*
 replay_pid*
 
-# OS
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+*.egg
+
+# ===== Node.js =====
+node_modules/
+dist/
+.vite/
+
+# ===== Claude Code =====
+.claude/
+
+# ===== OS =====
 .DS_Store
 Thumbs.db
+
+# ===== Secrets =====
+.env
+*.pem
+*.key
+
+# ===== Uploads / Runtime =====
+uploads/

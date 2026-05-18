@@ -1,0 +1,51 @@
+server:
+  port: 9090
+
+spring:
+  application:
+    name: agent-gateway
+  datasource:
+    url: jdbc:postgresql://localhost:5432/agent_platform
+    username: agent
+    password: agent123
+    driver-class-name: org.postgresql.Driver
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: agent
+    password: agent123
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 100MB
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+
+# JWT
+jwt:
+  secret: YWdlbnQtcGxhdGZvcm0tc2VjcmV0LWtleS0yMDI0LXByb2R1Y3Rpb24tZ3JhZGU=
+  expiration: 86400000
+
+# AI Engine
+ai:
+  engine:
+    url: http://localhost:8000
+    timeout: 300000
+
+logging:
+  level:
+    com.agent: DEBUG

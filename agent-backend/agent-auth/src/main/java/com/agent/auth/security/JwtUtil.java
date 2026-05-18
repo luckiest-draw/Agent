@@ -22,10 +22,12 @@ public class JwtUtil {
     }
 
     public SecretKey getKey() {
+
         return key;
     }
 
     public long getExpiration() {
+
         return expiration;
     }
 
@@ -41,8 +43,11 @@ public class JwtUtil {
     }
 
     public Claims parseToken(String token) {
-        return Jwts.parser().verifyWith(key).build()
-            .parseSignedClaims(token).getPayload();
+        return Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
     }
 
     public boolean validateToken(String token) {

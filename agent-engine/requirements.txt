@@ -1,0 +1,18 @@
+# Agent Engine Dependencies
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+langchain==0.3.13
+langchain-openai==0.2.14
+langgraph==0.2.60
+langchain-community==0.3.13
+pgvector==0.3.6
+psycopg2-binary==2.9.12
+python-multipart==0.0.19
+sse-starlette==2.1.3
+celery[redis]==5.4.0
+httpx==0.28.1
+pydantic-settings==2.7.1
+pypdf==5.1.0
+python-docx==1.1.2
+markdown==3.7
+beautifulsoup4==4.12.3
