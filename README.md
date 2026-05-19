@@ -208,12 +208,13 @@ npm run dev
 |------|------|------|
 | POST | `/api/knowledge/documents/upload` | 上传文档 (multipart) |
 
-### 会话
+### 会话（带记忆：滑动窗口 + Token 压缩 + PII 脱敏 + 话题检测）
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/conversations` | 会话列表 |
 | POST | `/api/conversations` | 创建会话 |
-| POST | `/api/conversations/stream` | SSE 流式对话 |
+| POST | `/api/conversations/stream` | SSE 流式对话（无会话ID） |
+| POST | `/api/conversations/{id}/stream` | SSE 流式对话（带上下文记忆+话题检测） |
 | GET | `/api/conversations/{id}/messages` | 历史消息 |
 
 ### 编排
@@ -276,6 +277,7 @@ npm run dev
 ## 设计决策
 
 - **使用 Lombok + MyBatis-Plus**: 实体类用 `@Getter/@Setter`，DTO 用 `@Data`，减少样板代码。持久层用 MyBatis-Plus `BaseMapper` + `LambdaQueryWrapper` 替代 JPA。注意需要 `JAVA_HOME` 指向 JDK 17（JDK 24 下 Lombok 1.18.36 不兼容）
+- **会话记忆系统**: Redis + PostgreSQL 两级缓存，20 轮滑动窗口（LTRIM），Token 超 4000 自动压缩旧消息为摘要，PII 脱敏（手机/身份证/邮箱/银行卡进 Redis 前脱敏），语义话题检测自动分子会话
 - **统一错误码**: `ErrorCode` 枚举集中管理业务错误码，`BusinessException` 携带 ErrorCode，异常处理更规范
 - **Schema 管理**: 用 `schema.sql` 定义 DDL（`spring.sql.init.mode=always`），替代 Hibernate 的 `ddl-auto`
 - **Pgvector 部署在 PostgreSQL**: 单库同时管理关系数据和向量检索

@@ -46,6 +46,15 @@ ai:
     url: http://localhost:8000
     timeout: 300000
 
+# Chat Memory
+memory:
+  max-rounds: 20
+  token-budget: 4000
+  redis-ttl-seconds: 86400
+  topic-detection:
+    enabled: true
+    similarity-threshold: 0.6
+
 logging:
   level:
     com.agent: DEBUG

@@ -96,6 +96,8 @@ CREATE TABLE IF NOT EXISTS conv_conversation (
     tenant_id BIGINT,
     agent_config_id BIGINT,
     message_count INTEGER DEFAULT 0,
+    parent_id BIGINT,
+    summary TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

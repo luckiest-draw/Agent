@@ -112,19 +112,49 @@ POST /api/auth/register  { username, password, email }
   - 请求结束后自动清理
 
 #### 3.2 会话管理 (agent-conversation)
-- `Conversation` (`conv_conversation`) — 会话：title、userId、tenantId、agentConfigId、messageCount
+- `Conversation` (`conv_conversation`) — 会话：title、userId、tenantId、agentConfigId、messageCount、parentId、summary
 - `Message` (`conv_message`) — 消息：conversationId、role(user/assistant/system)、content、tokenCount
 
-**核心流程——流式对话**：
+**会话记忆系统**（两级缓存 + 多层处理）：
+
 ```
-前端 POST /api/conversations/stream  { query, history, model }
-    → ConversationController.streamChat()
-        → 创建临时 Conversation，保存用户消息
-        → StreamingProxy.streamChat(query, history, convId, model, emitter)
-            → 新线程发 HTTP POST 到 Python 引擎 /chat/stream
-            → 读取 SSE 流 (data: {...}\n\n)
-            → 通过 SseEmitter 转发给前端
-    → 前端逐字渲染
+用户消息
+    │
+    ├── PiiMasker         → 正则脱敏（手机/身份证/邮箱/银行卡）
+    ├── TopicDetector     → 三层漏斗话题检测
+    │     ├── 第1层：关键词交集 > 50% → 同话题，跳过
+    │     ├── 第2层：短句/闲聊 → 跳过
+    │     ├── 第3层：Embedding + 余弦相似度 → 判话题切换
+    │     └── 话题切换 → 自动创建子会话 (parentId 关联)
+    ├── MemoryPipeline    → 上下文构建编排器
+    │     ├── MessageCacheService → Redis List 读写 + TTL 24h
+    │     ├── TokenCounter → 中英文混排估算 token 数
+    │     └── CompressionService → 超 4000 token 压缩旧消息为摘要
+    └── StreamingProxy    → 转发到 Python AI 引擎
+```
+
+**Redis 存储结构**：
+| Key | 类型 | 说明 |
+|-----|------|------|
+| `chat:history:{convId}` | List (JSON) | 最近 20 轮（40条）消息，RPUSH + LTRIM |
+| `chat:summary:{convId}` | String | LLM 生成的压缩摘要 |
+| `chat:topic:{convId}` | String | 运行中话题向量 (JSON float[]) |
+| `chat:keywords:{convId}` | Set | 最近消息关键词（第1层粗筛用） |
+
+**核心流程——流式对话（带记忆）**：
+```
+前端 POST /api/conversations/{id}/stream  { message, modelName }
+    → ConversationController.stream()
+        1. PiiMasker.mask() → 脱敏
+        2. TopicDetector.detect() → 三层漏斗判话题
+           └─ 话题切换 → 创建子会话 (parentId=原id)
+        3. ChatService.saveUserMessage() → DB + Redis 双写
+        4. MemoryPipeline.buildContext()
+           → Redis 拉历史 → 滑动窗口截断 → Token 超限则压缩
+        5. StreamingProxy.streamChat() → 拼上下文 → Python 引擎
+        6. 回调收集完整 AI 回复
+        7. afterResponse: 保存回复 → DB + Redis 双写 + 更新统计
+    → SSE 流式返回前端逐字渲染
 ```
 
 关键文件：
@@ -323,37 +353,42 @@ while (true) {
     → 后续请求自动带 Authorization: Bearer xxx
 ```
 
-#### 6.2 流式聊天完整链路
+#### 6.2 流式聊天完整链路（带会话记忆）
 ```
 [浏览器 Chat.tsx]
-    POST /api/conversations/stream
+    POST /api/conversations/{id}/stream
     Headers: Authorization: Bearer <JWT>, Content-Type: application/json
-    Body: { query: "你好", history: [...], model: "deepseek-v4-pro" }
+    Body: { message: "帮我查一下", modelName: "deepseek-v4-pro" }
         │
         ▼
-[Spring 后端 ConversationController]
-    SecurityConfig: permitAll → 放行
-    JwtFilter: 提取token → 解析userId/roles → 设置SecurityContext
-    streamChat():
-        1. 创建 Conversation(title=query前30字)
-        2. ChatService.saveUserMessage() → 保存用户消息
-        3. StreamingProxy.streamChat(query, history, convId, model, emitter)
+[Spring 后端 ConversationController.stream()]
+    1. PiiMasker.mask() → "帮我查一下"
+    2. TopicDetector.detect() → 关键词粗筛 → 同话题跳过 Embedding
+    3. ChatService.saveUserMessage() → MessageMapper.insert() + Redis RPUSH
+    4. MemoryPipeline.buildContext()
+       └─ MessageCacheService.getHistory() → Redis LRANGE (24h TTL)
+          └─ 缓存未命中 → MessageMapper.selectList() 回源 DB
+       └─ TokenCounter.estimateTokens() → 中文/1.5
+       └─ 超 4000 tokens? → CompressionService.buildCompressedContext()
+          └─ 调 Python /memory/summarize → 旧消息压缩为摘要
+    5. StreamingProxy.streamChat(maskedQuery, context, emitter, callback)
         │
         ▼
 [StreamingProxy 新线程]
     HttpURLConnection POST → http://localhost:8000/chat/stream
-    Body: {"query":"你好","history":[...],"model":"deepseek-v4-pro"}
+    Body: {
+        "query": "帮我查一下",
+        "history": [{"role":"system","content":"摘要..."}, ...最近消息],
+        "model": "deepseek-v4-pro"
+    }
         │
         ▼
 [Python FastAPI /chat/stream]
-    ChatRequest 模型校验
-    event_generator():
-        chat_stream(query, history, model)
-            create_llm("deepseek-v4-pro", streaming=True)
-                → 查 MODEL_ROUTES → (https://api.deepseek.com/v1, sk-xxx)
-                → ChatOpenAI(model="deepseek-v4-pro", ...)
-            llm.astream(messages) → 逐token生成
-            yield f"data: {json.dumps({'content': token, 'done': False})}\n\n"
+    chat_stream(query, history, model)
+        → format_messages(history) → LangChain SystemMessage/AIMessage/HumanMessage
+        → create_llm("deepseek-v4-pro", streaming=True)
+        → llm.astream(messages) → 逐token生成
+        → yield f"data: {...}\n\n"
         │
         ▼ (SSE stream)
 [DeepSeek API] → 逐 token 返回
@@ -361,6 +396,9 @@ while (true) {
         ▼
 [StreamingProxy]
     BufferedReader.readLine() → 解析每行SSE
+    收集 fullResponse += content → 流结束后 callback.onComplete(reply)
+    → PiiMasker.mask(reply) → saveAssistantMessage(DB + Redis 双写)
+    → MemoryPipeline.afterResponse() → LTRIM + 更新token统计 + 刷新TTL
     emitter.send(SseEmitter.event().data(jsonContent))
         │
         ▼ (SSE over HTTP)

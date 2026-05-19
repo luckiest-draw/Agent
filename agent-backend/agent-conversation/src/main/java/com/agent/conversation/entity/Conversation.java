@@ -14,4 +14,6 @@ public class Conversation extends BaseEntity {
     private Long tenantId;
     private Long agentConfigId;
     private Integer messageCount = 0;
+    private Long parentId;
+    private String summary;
 }

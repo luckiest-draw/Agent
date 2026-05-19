@@ -126,6 +126,42 @@ def embed_texts(request: EmbeddingRequest):
     return {"status": "done", "count": count}
 
 
+# ==================== Memory Support ====================
+
+class SingleEmbedRequest(BaseModel):
+    text: str
+
+@app.post("/rag/embed-single")
+def embed_single(request: SingleEmbedRequest):
+    """获取单文本的 embedding 向量，不存入 pgvector（话题检测用）"""
+    from rag.vector_store import create_embeddings
+    emb = create_embeddings()
+    vector = emb.embed_query(request.text)
+    return {"embedding": vector, "dimensions": len(vector)}
+
+
+class SummarizeRequest(BaseModel):
+    messages: List[Dict[str, str]]  # [{"role": "user/assistant", "content": "..."}]
+    model: Optional[str] = None
+
+@app.post("/memory/summarize")
+def summarize_messages(request: SummarizeRequest):
+    """将旧消息压缩为 ~200 词的摘要"""
+    llm = create_llm(model_name=request.model, temperature=0.3, max_tokens=512, streaming=False)
+    conversation = "\n".join(
+        f"{'User' if m.get('role') == 'user' else 'Assistant'}: {m.get('content', '')}"
+        for m in request.messages
+    )
+    prompt = (
+        "Summarize the following conversation fragment into a concise paragraph (under 200 words) "
+        "that captures all key topics, facts, and decisions. Write in the same language as the conversation:\n\n"
+        f"{conversation}"
+    )
+    result = llm.invoke(prompt)
+    summary = result.content if hasattr(result, "content") else str(result)
+    return {"summary": summary}
+
+
 # ==================== Model Info ====================
 
 @app.get("/models/supported")

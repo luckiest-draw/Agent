@@ -4,6 +4,7 @@ import com.agent.conversation.service.ChatService;
 
 import com.agent.conversation.entity.Message;
 import com.agent.conversation.mapper.MessageMapper;
+import com.agent.conversation.service.MessageCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -13,6 +14,9 @@ public class ChatServiceImpl implements ChatService {
     @Autowired
     private MessageMapper messageMapper;
 
+    @Autowired
+    private MessageCacheService messageCacheService;
+
     @Override
     public Message saveUserMessage(Long conversationId, String content) {
         Message msg = new Message();
@@ -20,6 +24,8 @@ public class ChatServiceImpl implements ChatService {
         msg.setRole("user");
         msg.setContent(content);
         messageMapper.insert(msg);
+        // 双写到 Redis
+        messageCacheService.addMessage(conversationId, "user", content);
         return msg;
     }
 
@@ -30,6 +36,8 @@ public class ChatServiceImpl implements ChatService {
         msg.setRole("assistant");
         msg.setContent(content);
         messageMapper.insert(msg);
+        // 双写到 Redis
+        messageCacheService.addMessage(conversationId, "assistant", content);
         return msg;
     }
 }
