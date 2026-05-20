@@ -16,3 +16,4 @@ pypdf==5.1.0
 python-docx==1.1.2
 markdown==3.7
 beautifulsoup4==4.12.3
+PyMuPDF==1.25.1

@@ -29,6 +29,7 @@ class ChatRequest(BaseModel):
     maxTokens: int = 2048
     useRag: bool = False
     topK: int = 5
+    imageUrl: Optional[str] = None
 
 
 class EmbeddingRequest(BaseModel):
@@ -61,6 +62,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                 model=request.model,
                 system_prompt=request.systemPrompt,
                 temperature=request.temperature,
+                image_url=request.imageUrl,
             ):
                 yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
             yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
@@ -91,6 +93,7 @@ async def rag_chat_endpoint(request: ChatRequest):
                 system_prompt=request.systemPrompt,
                 temperature=request.temperature,
                 top_k=request.topK,
+                image_url=request.imageUrl,
             ):
                 yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
             yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
@@ -160,6 +163,31 @@ def summarize_messages(request: SummarizeRequest):
     result = llm.invoke(prompt)
     summary = result.content if hasattr(result, "content") else str(result)
     return {"summary": summary}
+
+
+# ==================== Speech-to-Text ====================
+
+from fastapi import UploadFile, File
+
+@app.post("/speech/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """语音转文字,调用 OpenAI Whisper API"""
+    from openai import OpenAI
+    audio_bytes = await file.read()
+    client = OpenAI(
+        api_key=settings.openai_api_key or settings.deepseek_api_key,
+        base_url=settings.openai_base_url,
+    )
+    try:
+        result = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=("audio.webm", audio_bytes, file.content_type or "audio/webm"),
+            language="zh",
+        )
+        return {"text": result.text}
+    except Exception as e:
+        logger.error(f"Whisper transcription error: {e}")
+        raise HTTPException(status_code=500, detail=f"语音转写失败: {str(e)}")
 
 
 # ==================== Model Info ====================
