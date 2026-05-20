@@ -1,12 +1,15 @@
-# Chat Agent: 多轮对话 + 流式输出
-from typing import AsyncIterator, List, Dict
+# Chat Agent: 多轮对话 + 流式输出 + 多模态图片支持
+from typing import AsyncIterator, List, Dict, Optional
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from models.model_manager import create_llm
+from models.model_manager import create_llm, supports_vision
+from models.multimodal import build_multimodal_content
 from rag.retriever import retrieve_context, build_rag_prompt
+import logging
+
+logger = logging.getLogger("chat_agent")
 
 
 def format_messages(history: List[Dict], system_prompt: str = None) -> list:
-    """将历史消息转为LangChain格式"""
     messages = []
     if system_prompt:
         messages.append(SystemMessage(content=system_prompt))
@@ -26,11 +29,22 @@ async def chat_stream(
     model: str = None,
     system_prompt: str = None,
     temperature: float = 0.7,
+    image_url: Optional[str] = None,
 ) -> AsyncIterator[str]:
-    """流式对话,返回SSE事件"""
-    llm = create_llm(model_name=model, temperature=temperature, streaming=True)
+    model_name = model or "deepseek-chat"
+
+    if image_url and not supports_vision(model_name):
+        yield f"[错误] 模型 {model_name} 不支持图片输入，请切换到 gpt-4o / glm-4v / qwen-vl / gemini"
+        return
+
+    llm = create_llm(model_name=model_name, temperature=temperature, streaming=True)
     messages = format_messages(history, system_prompt)
-    messages.append(HumanMessage(content=query))
+
+    if image_url:
+        msg_content = build_multimodal_content(query, image_url)
+        messages.append(HumanMessage(content=msg_content))
+    else:
+        messages.append(HumanMessage(content=query))
 
     async for chunk in llm.astream(messages):
         content = chunk.content if hasattr(chunk, "content") else str(chunk)
@@ -45,17 +59,26 @@ async def rag_chat_stream(
     system_prompt: str = None,
     temperature: float = 0.7,
     top_k: int = 5,
+    image_url: Optional[str] = None,
 ) -> AsyncIterator[str]:
-    """RAG增强对话流式输出"""
-    # 检索相关文档
+    model_name = model or "deepseek-chat"
+
+    if image_url and not supports_vision(model_name):
+        yield f"[错误] 模型 {model_name} 不支持图片输入，请切换到 gpt-4o / glm-4v / qwen-vl / gemini"
+        return
+
     context_docs = retrieve_context(query, top_k)
-    # 构建RAG提示词
     rag_system = build_rag_prompt(query, context_docs, system_prompt)
 
-    llm = create_llm(model_name=model, temperature=temperature, streaming=True)
+    llm = create_llm(model_name=model_name, temperature=temperature, streaming=True)
     messages = format_messages(history)
     messages.insert(0, SystemMessage(content=rag_system))
-    messages.append(HumanMessage(content=query))
+
+    if image_url:
+        msg_content = build_multimodal_content(query, image_url)
+        messages.append(HumanMessage(content=msg_content))
+    else:
+        messages.append(HumanMessage(content=query))
 
     async for chunk in llm.astream(messages):
         content = chunk.content if hasattr(chunk, "content") else str(chunk)
