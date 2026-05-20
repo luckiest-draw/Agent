@@ -87,14 +87,18 @@ public class DocIngestServiceImpl implements DocIngestService {
             }
 
             if (images != null && !images.isBlank()) {
-                Chunk chunk = new Chunk();
-                chunk.setDocumentId(doc.getId());
-                chunk.setContent(needsVision ? "[需要多模态处理]" : "");
-                chunk.setChunkType("image");
-                chunk.setImagePath(images);
-                chunk.setChunkIndex(chunkIndex);
-                chunkMapper.insert(chunk);
-                chunkIndex++;
+                String[] imagePathArray = images.split(";");
+                for (String imgPath : imagePathArray) {
+                    if (imgPath.isBlank()) continue;
+                    Chunk chunk = new Chunk();
+                    chunk.setDocumentId(doc.getId());
+                    chunk.setContent(needsVision ? "[需要多模态处理]" : "");
+                    chunk.setChunkType("image");
+                    chunk.setImagePath(imgPath.trim());
+                    chunk.setChunkIndex(chunkIndex);
+                    chunkMapper.insert(chunk);
+                    chunkIndex++;
+                }
             }
 
             doc.setChunkCount(chunkIndex);

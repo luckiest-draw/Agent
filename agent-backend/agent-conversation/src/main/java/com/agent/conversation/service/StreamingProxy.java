@@ -33,9 +33,9 @@ public class StreamingProxy {
         }
     }
 
-    /** 带上下文 + 回调（Controller 使用，可收集完整回复） */
+    /** 带上下文 + 图片 + 回调（Controller 使用，可收集完整回复） */
     public void streamChat(String userMessage, MemoryContext context,
-                           Long conversationId, String modelName,
+                           Long conversationId, String modelName, String imageUrl,
                            SseEmitter emitter, ResponseCallback callback) {
         new Thread(() -> {
             StringBuilder fullResponse = new StringBuilder();
@@ -60,10 +60,13 @@ public class StreamingProxy {
                 body.put("query", userMessage);
                 body.put("history", history);
                 body.put("model", modelName != null ? modelName : "deepseek-chat");
+                if (imageUrl != null && !imageUrl.isEmpty()) {
+                    body.put("imageUrl", imageUrl);
+                }
 
                 String json = mapper.writeValueAsString(body);
-                log.info("StreamingProxy -> {} msgs={} tokens={}", uri, history.size(),
-                    context.estimatedTokens());
+                log.info("StreamingProxy -> {} msgs={} tokens={} image={}", uri, history.size(),
+                    context.estimatedTokens(), imageUrl != null);
 
                 try (OutputStream os = conn.getOutputStream()) {
                     os.write(json.getBytes(StandardCharsets.UTF_8));
@@ -112,10 +115,11 @@ public class StreamingProxy {
         }).start();
     }
 
-    /** 无回调版本（纯转发，用于无会话ID的流式） */
+    /** 无回调版本 */
     public void streamChat(String userMessage, MemoryContext context,
-                           Long conversationId, String modelName, SseEmitter emitter) {
-        streamChat(userMessage, context, conversationId, modelName, emitter, null);
+                           Long conversationId, String modelName, String imageUrl,
+                           SseEmitter emitter) {
+        streamChat(userMessage, context, conversationId, modelName, imageUrl, emitter, null);
     }
 
     /** 兼容旧签名 */
@@ -130,6 +134,6 @@ public class StreamingProxy {
                     .toList()
                 : List.of(),
                 0),
-            conversationId, modelName, emitter, null);
+            conversationId, modelName, null, emitter, null);
     }
 }
