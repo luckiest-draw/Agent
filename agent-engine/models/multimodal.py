@@ -1,12 +1,6 @@
 # Multimodal utilities: read image file, build vision model messages
 import base64
-import logging
-import os
-import imghdr
 from pathlib import Path
-from typing import List, Dict, Optional
-
-logger = logging.getLogger("multimodal")
 
 IMAGE_EXT_TO_MIME = {
     "jpg": "image/jpeg", "jpeg": "image/jpeg",
@@ -18,14 +12,17 @@ IMAGE_EXT_TO_MIME = {
 
 
 def encode_image_to_base64(image_path: str) -> str:
-    abs_path = Path(image_path)
-    if not abs_path.is_absolute():
-        # Relative to gateway uploads dir — resolve from project root
-        abs_path = Path(__file__).parent.parent.parent.parent / "agent-gateway" / image_path
-    if not abs_path.exists():
-        abs_path = Path(image_path)
-    if not abs_path.exists():
-        raise FileNotFoundError(f"Image not found: {image_path} (tried {abs_path})")
+    candidates = [
+        Path(image_path),
+        Path(__file__).parent.parent.parent.parent / "agent-gateway" / image_path,
+    ]
+    abs_path = None
+    for p in candidates:
+        if p.exists():
+            abs_path = p
+            break
+    if abs_path is None:
+        raise FileNotFoundError(f"Image not found: {image_path}")
 
     ext = abs_path.suffix.lstrip(".").lower()
     mime = IMAGE_EXT_TO_MIME.get(ext, "image/png")
