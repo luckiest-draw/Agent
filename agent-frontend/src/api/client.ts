@@ -47,6 +47,32 @@ export const api = {
       body: JSON.stringify({ query, history, model }),
     }),
 
+  // Image upload (multipart)
+  uploadImage: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const h: Record<string, string> = {};
+    if (authToken) h['Authorization'] = `Bearer ${authToken}`;
+    return fetch(`${BASE_URL}/conversations/upload-image`, {
+      method: 'POST',
+      headers: h,
+      body: formData,
+    }).then(res => res.json());
+  },
+
+  // Audio transcription (multipart)
+  transcribeAudio: (audioBlob: Blob) => {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'recording.webm');
+    const h: Record<string, string> = {};
+    if (authToken) h['Authorization'] = `Bearer ${authToken}`;
+    return fetch(`${BASE_URL}/conversations/transcribe`, {
+      method: 'POST',
+      headers: h,
+      body: formData,
+    }).then(res => res.json());
+  },
+
   // Knowledge
   uploadDocument: (file: File, tenantId: number) => {
     const formData = new FormData();

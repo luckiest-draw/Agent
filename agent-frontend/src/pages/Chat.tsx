@@ -1,16 +1,21 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAppStore } from '@/store/appStore'
 import { Send, Bot, User } from 'lucide-react'
+import ImageUploader, { type ImageInfo } from '@/components/chat/ImageUploader'
+import AudioRecorder from '@/components/chat/AudioRecorder'
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
+  imageUrl?: string
 }
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const [images, setImages] = useState<ImageInfo[]>([])
+  const [showImageViewer, setShowImageViewer] = useState<string | null>(null)
   const selectedModel = useAppStore((s) => s.selectedModel)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -19,11 +24,22 @@ export default function Chat() {
   }, [messages])
 
   const handleSend = async () => {
-    if (!input.trim() || streaming) return
-    const query = input.trim()
-    const userMsg: Message = { role: 'user', content: query }
+    if (streaming) return
+    const text = input.trim()
+    if (!text && images.length === 0) return
+    setStreaming(true)
+
+    const readyImages = images.filter(img => img.serverUrl && !img.uploading)
+    const primaryImageUrl = readyImages.length > 0 ? readyImages[0].serverUrl : undefined
+
+    const userMsg: Message = {
+      role: 'user',
+      content: text || '请描述这张图片',
+      imageUrl: primaryImageUrl || undefined,
+    }
     setMessages((prev) => [...prev, userMsg])
     setInput('')
+    setImages([])
     setStreaming(true)
 
     try {
@@ -31,7 +47,12 @@ export default function Chat() {
       const res = await fetch('/api/conversations/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ query, history: messages, model: selectedModel }),
+        body: JSON.stringify({
+          query: text || '请描述这张图片',
+          history: messages,
+          model: selectedModel,
+          imageUrl: primaryImageUrl || undefined,
+        }),
       })
       const reader = res.body?.getReader()
       if (!reader) return
@@ -72,6 +93,10 @@ export default function Chat() {
     }
   }
 
+  const handleTranscribed = (text: string) => {
+    setInput(prev => prev ? prev + ' ' + text : text)
+  }
+
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] max-w-3xl mx-auto">
       <div className="mb-4">
@@ -83,7 +108,7 @@ export default function Chat() {
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <Bot className="w-12 h-12 mb-4 opacity-20" />
-            <p>Start a conversation with the AI Agent</p>
+            <p>开始对话，可以上传图片或发送语音</p>
           </div>
         )}
         {messages.map((msg, i) => (
@@ -98,7 +123,15 @@ export default function Chat() {
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-card border border-border'
             }`}>
-              <p className="whitespace-pre-wrap">{msg.content}</p>
+              {msg.imageUrl && (
+                <img
+                  src={msg.imageUrl}
+                  alt="Attached"
+                  className="max-w-[300px] max-h-[200px] rounded-lg mb-2 cursor-pointer hover:opacity-90"
+                  onClick={() => setShowImageViewer(msg.imageUrl!)}
+                />
+              )}
+              {msg.content && <p className="whitespace-pre-wrap">{msg.content}</p>}
             </div>
             {msg.role === 'user' && (
               <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center shrink-0">
@@ -110,23 +143,40 @@ export default function Chat() {
         <div ref={scrollRef} />
       </div>
 
-      <div className="mt-4 flex gap-2">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder="Type a message..."
-          disabled={streaming}
-          className="flex-1 px-4 py-3 rounded-xl border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
-        />
-        <button
-          onClick={handleSend}
-          disabled={streaming || !input.trim()}
-          className="px-4 py-3 rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
-        >
-          <Send className="w-4 h-4" />
-        </button>
+      <div className="mt-4 space-y-2">
+        <ImageUploader images={images} onChange={setImages} />
+        <div className="flex gap-2">
+          <AudioRecorder onTranscribed={handleTranscribed} disabled={streaming} />
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            placeholder="输入消息..."
+            disabled={streaming}
+            className="flex-1 px-4 py-3 rounded-xl border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+          />
+          <button
+            onClick={handleSend}
+            disabled={streaming || (!input.trim() && images.length === 0)}
+            className="px-4 py-3 rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
       </div>
+
+      {showImageViewer && (
+        <div
+          className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center cursor-pointer"
+          onClick={() => setShowImageViewer(null)}
+        >
+          <img
+            src={showImageViewer}
+            alt="Viewer"
+            className="max-w-[90vw] max-h-[90vh] rounded-lg object-contain"
+          />
+        </div>
+      )}
     </div>
   )
 }
