@@ -27,7 +27,7 @@ public class TranscribeController {
     @PostMapping("/transcribe")
     public Result<Map<String, String>> transcribe(@RequestParam("file") MultipartFile file) throws Exception {
         if (file.isEmpty()) {
-            return Result.fail("音频文件为空");
+            return Result.fail(500, "音频文件为空");
         }
 
         String url = engineUrl + "/speech/transcribe";
@@ -45,10 +45,10 @@ public class TranscribeController {
                 String text = (String) response.getBody().get("text");
                 return Result.ok(Map.of("text", text));
             }
-            return Result.fail("语音转写失败");
+            return Result.fail(500, "语音转写失败");
         } catch (Exception e) {
             log.error("Transcribe error: {}", e.getMessage());
-            return Result.fail("语音转写服务异常: " + e.getMessage());
+            return Result.fail(500, "语音转写服务异常: " + e.getMessage());
         }
     }
 }

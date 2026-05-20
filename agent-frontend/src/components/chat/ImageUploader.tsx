@@ -13,7 +13,7 @@ interface ImageInfo {
 
 interface Props {
   images: ImageInfo[];
-  onChange: (images: ImageInfo[]) => void;
+  onChange: React.Dispatch<React.SetStateAction<ImageInfo[]>>;
 }
 
 export default function ImageUploader({ images, onChange }: Props) {
