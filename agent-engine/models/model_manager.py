@@ -16,6 +16,8 @@ MODEL_ROUTES = {
     "qwen-vl-max": (settings.qwen_base_url, settings.qwen_api_key),
     "glm-4": (settings.glm_base_url, settings.glm_api_key),
     "glm-4v": (settings.glm_base_url, settings.glm_api_key),
+    "gemini-2.5-flash": (settings.gemini_base_url, settings.gemini_api_key),
+    "gemini-2.5-pro": (settings.gemini_base_url, settings.gemini_api_key),
 }
 
 

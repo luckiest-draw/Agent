@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     glm_api_key: Optional[str] = None
     glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    gemini_api_key: Optional[str] = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
 
     # Default model
     default_model: str = "deepseek-chat"
@@ -40,7 +42,12 @@ class Settings(BaseSettings):
     top_k: int = 5
 
     # Vision models (support image input)
-    vision_models: list = ["gpt-4o", "gpt-4-turbo", "glm-4v", "qwen-vl-plus", "qwen-vl-max"]
+    vision_models: list = [
+        "gpt-4o", "gpt-4-turbo",
+        "glm-4v",
+        "qwen-vl-plus", "qwen-vl-max",
+        "gemini-2.5-flash", "gemini-2.5-pro",
+    ]
 
     class Config:
         env_file = ".env"
