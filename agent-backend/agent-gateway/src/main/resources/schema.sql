@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS conv_message (
     conversation_id BIGINT NOT NULL,
     role VARCHAR(10),
     content TEXT,
+    image_url VARCHAR(500),
     token_count INTEGER,
     response_time_ms BIGINT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

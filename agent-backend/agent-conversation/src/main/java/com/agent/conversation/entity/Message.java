@@ -12,6 +12,7 @@ public class Message extends BaseEntity {
     private Long conversationId;
     private String role;
     private String content;
+    private String imageUrl;
     private Integer tokenCount;
     private Long responseTimeMs;
 }

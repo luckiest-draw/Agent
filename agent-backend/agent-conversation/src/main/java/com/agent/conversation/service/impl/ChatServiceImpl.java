@@ -30,6 +30,18 @@ public class ChatServiceImpl implements ChatService {
     }
 
     @Override
+    public Message saveUserMessage(Long conversationId, String content, String imageUrl) {
+        Message msg = new Message();
+        msg.setConversationId(conversationId);
+        msg.setRole("user");
+        msg.setContent(content);
+        msg.setImageUrl(imageUrl);
+        messageMapper.insert(msg);
+        messageCacheService.addMessage(conversationId, "user", content);
+        return msg;
+    }
+
+    @Override
     public Message saveAssistantMessage(Long conversationId, String content) {
         Message msg = new Message();
         msg.setConversationId(conversationId);
