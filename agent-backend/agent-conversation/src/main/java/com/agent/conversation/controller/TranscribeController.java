@@ -31,23 +31,31 @@ public class TranscribeController {
         }
 
         String url = engineUrl + "/speech/transcribe";
+        log.info("Forwarding audio to Python engine: {} ({} bytes)", file.getOriginalFilename(), file.getSize());
 
-        var headers = new HttpHeaders();
+        HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
 
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        body.add("file", file.getResource());
+        body.add("file", new org.springframework.core.io.ByteArrayResource(file.getBytes()) {
+            @Override
+            public String getFilename() {
+                return file.getOriginalFilename() != null ? file.getOriginalFilename() : "recording.webm";
+            }
+        });
 
-        var requestEntity = new HttpEntity<>(body, headers);
+        HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
         try {
-            var response = restTemplate.postForEntity(url, requestEntity, Map.class);
+            ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.POST, requestEntity, Map.class);
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                 String text = (String) response.getBody().get("text");
+                log.info("Transcribe result: {}", text);
                 return Result.ok(Map.of("text", text));
             }
+            log.error("Transcribe failed: HTTP {}", response.getStatusCode());
             return Result.fail(500, "语音转写失败");
         } catch (Exception e) {
-            log.error("Transcribe error: {}", e.getMessage());
+            log.error("Transcribe error: {}", e.getMessage(), e);
             return Result.fail(500, "语音转写服务异常: " + e.getMessage());
         }
     }

@@ -174,9 +174,12 @@ async def transcribe_audio(file: UploadFile = File(...)):
     """语音转文字,调用 OpenAI Whisper API"""
     from openai import OpenAI
     audio_bytes = await file.read()
+    api_key = settings.openai_api_key
+    if not api_key:
+        raise HTTPException(status_code=500, detail="请配置 OPENAI_API_KEY，Whisper 必须使用 OpenAI API")
     client = OpenAI(
-        api_key=settings.openai_api_key or settings.deepseek_api_key,
-        base_url=settings.openai_base_url,
+        api_key=api_key,
+        base_url="https://api.openai.com/v1",
     )
     try:
         result = client.audio.transcriptions.create(
