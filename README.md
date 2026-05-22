@@ -23,7 +23,7 @@
 ┌──────────▼──────────────────────────────────────────────┐
 │               AI 引擎 (Python FastAPI)                    │
 │  LangChain / LangGraph / Celery / Pgvector                │
-│  多模型: DeepSeek · GPT-4o · Qwen · GLM-4                 │
+│  多模型: DeepSeek · GPT-4o · Qwen · GLM-4 · Gemini          │
 └─────────────────────────────────────────────────────────┘
            │        │          │
 ┌──────────▼──┐ ┌──▼───┐ ┌───▼──────────┐
@@ -61,15 +61,16 @@ Agent/
 │   ├── agent-monitor/              # API 日志, Token 用量监控
 │   └── agent-gateway/              # Spring Boot 入口, CORS/WS/MQ 配置
 ├── agent-engine/                   # Python AI 引擎
-│   ├── main.py                     # FastAPI 入口
+│   ├── main.py                     # FastAPI 入口 (含 /speech/transcribe, /rag/embed-single, /memory/summarize)
 │   ├── config.py                   # Pydantic 配置
 │   ├── models/
-│   │   └── model_manager.py        # 多模型路由 (OpenAI 兼容)
+│   │   ├── model_manager.py        # 多模型路由 (OpenAI 兼容, 含 Gemini)
+│   │   └── multimodal.py           # 图片 Base64 编码 + 多模态消息构建
 │   ├── rag/
 │   │   ├── vector_store.py         # Pgvector 集成
 │   │   └── retriever.py            # RAG 检索 + 提示词构建
 │   ├── agents/
-│   │   └── chat_agent.py           # 多轮对话 + 流式输出
+│   │   └── chat_agent.py           # 多轮对话 + 流式输出 (含视觉模型支持)
 │   ├── workflows/
 │   │   └── workflow_executor.py    # LangGraph DAG 执行器
 │   └── tasks/
@@ -78,9 +79,13 @@ Agent/
 │       └── workflow_exec.py        # 异步工作流执行
 └── agent-frontend/                 # React TypeScript 前端
     ├── src/
-    │   ├── api/client.ts           # HTTP API 客户端
+    │   ├── api/client.ts           # HTTP API 客户端 (含 uploadImage, transcribeAudio)
     │   ├── store/appStore.ts       # Zustand 全局状态
-    │   ├── components/layout/      # 侧边栏, 顶栏
+    │   ├── components/
+    │   │   ├── layout/             # 侧边栏, 顶栏
+    │   │   └── chat/
+    │   │       ├── ImageUploader.tsx   # 图片上传 + 缩略图预览
+    │   │       └── AudioRecorder.tsx   # 录音 + Whisper 转写
     │   └── pages/                  # 仪表盘/聊天/知识库/工作流/监控/设置/登录
     ├── vite.config.ts
     ├── tailwind.config.js
@@ -92,6 +97,8 @@ Agent/
 ### 多功能
 - **RAG 知识库** — 上传 PDF/Word/Markdown/HTML/TXT/图片，自动解析、分块、向量化存入 Pgvector
 - **多轮对话** — SSE 流式输出，RAG 增强，支持多模型切换
+- **图片视觉问答** — 聊天中上传图片，视觉模型 (GPT-4o/GLM-4v/Qwen-VL/Gemini) 理解并回答
+- **语音输入** — 浏览器录音 → OpenAI Whisper STT → 文字填入输入框 → LLM 文字回复
 - **Agent 编排** — 可配置的智能体，支持系统提示词、工具和模型选择
 - **可视化工作流** — React Flow 拖拽式 DAG 画布，节点类型：开始/智能体/工具/条件/结束
 - **监控看板** — Token 用量图表、API 调用日志、系统状态
@@ -99,12 +106,13 @@ Agent/
 
 ### 多模态
 - **文档类型**: PDF、Word (.docx)、Markdown、HTML、TXT
-- **图片支持**: JPG、PNG、GIF、BMP — 解析为图片块，标记需要视觉模型处理
-- **视觉模型**: GPT-4o、GPT-4 Turbo、GLM-4v、Qwen-VL-Plus/Max
+- **图片支持**: JPG、PNG、GIF、WebP、BMP — 上传至本地存储，24h 自动清理
+- **PDF 图片提取**: PyMuPDF (Python) + PDFBox (Java) 双引擎提取 PDF 中嵌入的图片
+- **视觉模型**: GPT-4o、GPT-4 Turbo、GLM-4v、Qwen-VL-Plus/Max、Gemini 2.5 Flash/Pro（共 7 个）
 - **优雅降级**: 模型不支持视觉时自动回退到纯文本处理
 
 ### 多模型
-支持 OpenAI 兼容 API: DeepSeek、GPT-4o、Qwen、GLM-4
+支持 OpenAI 兼容 API: DeepSeek、GPT-4o、Qwen、GLM-4、Gemini
 
 ### 混合通信
 - **HTTP (同步)**: REST API + SSE 流式对话
@@ -216,6 +224,8 @@ npm run dev
 | POST | `/api/conversations/stream` | SSE 流式对话（无会话ID） |
 | POST | `/api/conversations/{id}/stream` | SSE 流式对话（带上下文记忆+话题检测） |
 | GET | `/api/conversations/{id}/messages` | 历史消息 |
+| POST | `/api/conversations/upload-image` | 上传聊天图片（返回 imageUrl） |
+| POST | `/api/conversations/transcribe` | 语音转文字（multipart audio → Whisper） |
 
 ### 编排
 | 方法 | 路径 | 说明 |
@@ -243,10 +253,13 @@ npm run dev
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/health` | 健康检查 |
-| POST | `/chat/stream` | SSE 流式对话 |
-| POST | `/chat/rag` | RAG 增强流式对话 |
+| POST | `/chat/stream` | SSE 流式对话（含多模态 vision 支持） |
+| POST | `/chat/rag` | RAG 增强流式对话（含多模态） |
 | POST | `/rag/retrieve` | 检索文档 |
 | POST | `/rag/embed` | 文本向量化 |
+| POST | `/rag/embed-single` | 单文本向量化（话题检测用） |
+| POST | `/memory/summarize` | 压缩旧消息为摘要 |
+| POST | `/speech/transcribe` | OpenAI Whisper 语音转文字 |
 | GET | `/models/supported` | 支持的模型列表 |
 | POST | `/workflow/execute` | 同步执行工作流 |
 
@@ -263,9 +276,10 @@ npm run dev
 | 变量 | 说明 |
 |------|------|
 | `DEEPSEEK_API_KEY` | DeepSeek API 密钥 |
-| `OPENAI_API_KEY` | OpenAI API 密钥 |
+| `OPENAI_API_KEY` | OpenAI API 密钥（GPT-4o + Whisper 语音转写） |
 | `QWEN_API_KEY` | 通义千问 API 密钥 |
 | `GLM_API_KEY` | 智谱 GLM-4 API 密钥 |
+| `GEMINI_API_KEY` | Google Gemini API 密钥 |
 
 ### Docker 服务
 | 服务 | 端口 | 账号/密码 |
@@ -278,6 +292,9 @@ npm run dev
 
 - **使用 Lombok + MyBatis-Plus**: 实体类用 `@Getter/@Setter`，DTO 用 `@Data`，减少样板代码。持久层用 MyBatis-Plus `BaseMapper` + `LambdaQueryWrapper` 替代 JPA。注意需要 `JAVA_HOME` 指向 JDK 17（JDK 24 下 Lombok 1.18.36 不兼容）
 - **会话记忆系统**: Redis + PostgreSQL 两级缓存，20 轮滑动窗口（LTRIM），Token 超 4000 自动压缩旧消息为摘要，PII 脱敏（手机/身份证/邮箱/银行卡进 Redis 前脱敏），语义话题检测自动分子会话
+- **图片先上传后引用**: 用户选择图片即上传到 `uploads/chat-images/`，获得 URL 后才发送消息，避免大体积 base64 在消息体中传输；每日凌晨 3 点自动清理 24h 前的图片
+- **语音 STT 不 TTS**: 浏览器 MediaRecorder 录音 → Whisper API 转文字 → 填入输入框，用户确认后发送；模型仅文字回复，不做语音合成
+- **PDF 双引擎图片提取**: Python 端 PyMuPDF + Java 端 PDFBox 均可提取 PDF 嵌入图片，知识库入库时自动识别
 - **统一错误码**: `ErrorCode` 枚举集中管理业务错误码，`BusinessException` 携带 ErrorCode，异常处理更规范
 - **Schema 管理**: 用 `schema.sql` 定义 DDL（`spring.sql.init.mode=always`），替代 Hibernate 的 `ddl-auto`
 - **Pgvector 部署在 PostgreSQL**: 单库同时管理关系数据和向量检索

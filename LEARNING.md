@@ -8,7 +8,7 @@
 |----|--------|------|------|
 | 前端 | React 18 + TypeScript + Vite + Tailwind + Shadcn/ui | 3000 | 用户界面 |
 | 后端 | Java 17 + Spring Boot 3.2.5 + Maven 多模块 | 9090 | 业务逻辑、权限、数据持久化 |
-| AI 引擎 | Python 3.10+ + FastAPI + LangChain + LangGraph | 8000 | AI 推理、RAG、工作流执行 |
+| AI 引擎 | Python 3.10+ + FastAPI + LangChain + LangGraph + PyMuPDF | 8000 | AI 推理、RAG、多模态(视觉/语音)、工作流执行 |
 
 依赖基础设施：PostgreSQL+pgvector（向量库）、Redis（缓存）、RabbitMQ（消息队列），全部通过 Docker Compose 管理。
 
@@ -164,7 +164,52 @@ POST /api/auth/register  { username, password, email }
 
 > **调试经验**：Spring SseEmitter 发送的 SSE 格式是 `data:{...}`（无空格），前端解析需用 `line.startsWith('data:')` 而非 `line.startsWith('data: ')`
 
-#### 3.3 知识库 (agent-knowledge)
+**多模态聊天功能**：
+
+**图片上传 + 视觉问答**：
+```
+[浏览器] 用户选择图片 → ImageUploader 立即上传到 Java
+    POST /api/conversations/upload-image (multipart)
+    → ImageUploadService.saveImage()
+        → 校验类型 (JPEG/PNG/GIF/WebP/BMP) + 大小 (≤10MB)
+        → 保存到 uploads/chat-images/{date}/{uuid}.{ext}
+        → 返回 imageUrl
+[浏览器] 用户发送消息 + imageUrl
+    → StreamingProxy 将 imageUrl 传给 Python 引擎
+    → Python multimodal.py.encode_image_to_base64(imageUrl)
+        → 先在项目根目录下找文件，再尝试 agent-gateway/ 子目录
+        → 读取文件 → Base64 编码 → data:image/xxx;base64,...
+    → build_multimodal_content(text, imageUrl)
+        → LangChain HumanMessage(content=[
+            {"type": "text", "text": "..."},
+            {"type": "image_url", "image_url": {"url": "data:..."}}
+          ])
+    → 视觉模型 (GPT-4o/GLM-4v/Qwen-VL/Gemini) 理解图片并回复
+```
+- `ImageUploader.tsx` — 缩略图预览 + 上传中 spinner + 错误状态；使用 `URL.createObjectURL()` 生成本地预览
+- `ImageUploadService.java` — 服务端图片校验和存储
+- `CleanupTask.java` — `@Scheduled(cron = "0 0 3 * * ?")` 每日凌晨 3 点清理 24h 前图片
+- `multimodal.py` — **关键修复**：`image_path.lstrip("/")` 解决 Windows 下路径 `/uploads/...` 被 pathlib 当作根路径的问题
+
+> **设计决策**：图片"先上传后引用"(upload-then-reference)，而非随消息一起发送 base64。好处：消息体轻量、图片可复用、避免大体积 JSON。
+
+**语音输入 (STT without TTS)**：
+```
+[浏览器] 用户点击麦克风 → MediaRecorder API 录制 audio/webm
+    → 停止录音 → POST /api/conversations/transcribe (multipart)
+    → TranscribeController → 转发到 Python /speech/transcribe
+    → OpenAI Whisper API (硬编码 api.openai.com/v1，DeepSeek 不支持)
+    → 返回文字 → 填入输入框 → 用户确认后发送
+```
+- `AudioRecorder.tsx` — 脉冲动画 + 计时器 + 取消/发送按钮 + "转写中..." 状态
+- `TranscribeController.java` — **关键修复**：使用 `ByteArrayResource` 重写 `getFilename()`，而非 `MultipartFile.getResource()`（后者返回 `InputStreamResource`，RestTemplate 序列化 multipart 时缺少 filename 字段导致失败）
+
+**PDF 图片提取（双引擎）**：
+- Python 端：`fitz.open()` → `page.get_images()` → `doc.extract_image()` 提取嵌入图片
+- Java 端：`PDImageXObject` 从 PDF 页面资源中提取图片流
+- 知识库入库时自动检测，图片存入 `image_paths` 列（分号分隔）
+
+
 
 **文档上传处理流水线**：
 ```
@@ -353,12 +398,12 @@ while (true) {
     → 后续请求自动带 Authorization: Bearer xxx
 ```
 
-#### 6.2 流式聊天完整链路（带会话记忆）
+#### 6.2 流式聊天完整链路（带会话记忆 + 多模态支持）
 ```
 [浏览器 Chat.tsx]
     POST /api/conversations/{id}/stream
     Headers: Authorization: Bearer <JWT>, Content-Type: application/json
-    Body: { message: "帮我查一下", modelName: "deepseek-v4-pro" }
+    Body: { message: "帮我查一下", modelName: "deepseek-v4-pro", imageUrl: "..." }
         │
         ▼
 [Spring 后端 ConversationController.stream()]
@@ -371,7 +416,7 @@ while (true) {
        └─ TokenCounter.estimateTokens() → 中文/1.5
        └─ 超 4000 tokens? → CompressionService.buildCompressedContext()
           └─ 调 Python /memory/summarize → 旧消息压缩为摘要
-    5. StreamingProxy.streamChat(maskedQuery, context, emitter, callback)
+    5. StreamingProxy.streamChat(maskedQuery, context, emitter, callback, imageUrl)
         │
         ▼
 [StreamingProxy 新线程]
@@ -379,19 +424,25 @@ while (true) {
     Body: {
         "query": "帮我查一下",
         "history": [{"role":"system","content":"摘要..."}, ...最近消息],
-        "model": "deepseek-v4-pro"
+        "model": "deepseek-v4-pro",
+        "imageUrl": "/uploads/chat-images/2024-01-01/xxx.png"
     }
         │
         ▼
 [Python FastAPI /chat/stream]
-    chat_stream(query, history, model)
-        → format_messages(history) → LangChain SystemMessage/AIMessage/HumanMessage
-        → create_llm("deepseek-v4-pro", streaming=True)
+    chat_stream(query, history, model, image_url=imageUrl)
+        → 如果有 image_url 且模型支持vision:
+            multimodal.encode_image_to_base64(image_url)
+                → 从项目根目录 + agent-gateway/ 双路径查找
+                → Base64 编码 → data:image/png;base64,...
+            multimodal.build_multimodal_content(text, image_url)
+                → LangChain HumanMessage(content=[text_block, image_block])
+        → 非视觉模型: 普通 HumanMessage(content=text)
         → llm.astream(messages) → 逐token生成
         → yield f"data: {...}\n\n"
         │
         ▼ (SSE stream)
-[DeepSeek API] → 逐 token 返回
+[DeepSeek/OpenAI/Gemini API] → 逐 token 返回
         │
         ▼
 [StreamingProxy]
@@ -406,7 +457,7 @@ while (true) {
     reader.read() → TextDecoder.decode()
     解析 data:{...}\n\n → JSON.parse()
     setMessages({ ...last, content: last.content + token })
-    实时渲染到页面
+    实时渲染到页面（消息泡内图片可点击放大）
 ```
 
 #### 6.3 文档上传 + 向量化流程
@@ -469,6 +520,8 @@ while (true) {
 | **RAG** | 文档→分块→向量化(Pgvector)→检索→增强提示词→LLM |
 | **DAG 工作流** | React Flow(前端) → MyBatis-Plus 实体(后端) → LangGraph(Python) |
 | **OpenAI 兼容 API** | 所有模型统一 `ChatOpenAI` 接口，模型名路由分配不同 base_url/api_key |
+| **LangChain 多模态** | `HumanMessage(content=[text_block, image_block])` 传入 base64 图片给视觉模型 |
+| **上传-引用模式** | 图片先上传到服务端获取 URL，消息体只传 URL 引用，避免大体积 JSON |
 | **React 不可变状态** | `{ ...obj, field: newValue }` 而非 `obj.field = newValue` |
 | **多模块 Maven** | 9 模块，`agent-gateway` 聚合启动，父 POM 统一版本管理 |
 | **MyBatis-Plus** | `BaseMapper<T>` + `LambdaQueryWrapper` 类型安全查询，`@MapperScan` 扫描 |
@@ -488,3 +541,7 @@ while (true) {
 5. **追踪租户隔离**：在 `TenantInterceptor` 打断点，观察每个请求的 `X-Tenant-Id` 如何传递和清理。
 
 6. **体验 StrictMode**：注释掉 `main.tsx` 中的 `<React.StrictMode>`，观察 Chat 页面的流式渲染行为变化（理解 React 18 的副作用检测机制）。
+
+7. **追踪多模态消息**：在 Chat 页面发一张图片，在 `multimodal.py` 的 `encode_image_to_base64()` 打断点，观察 Java → Python 的路径传递和 Base64 编码过程；再在 `chat_agent.py` 的 `build_multimodal_content()` 处观察 LangChain `HumanMessage` 的 `content` 列表结构。切换到非视觉模型（如 DeepSeek），观察优雅降级行为。
+
+8. **追踪语音链路**：在 `AudioRecorder.tsx` 的 `recorder.onstop` 打断点，观察 Blob 创建 → `api.transcribeAudio()` → Java `TranscribeController` → Python `/speech/transcribe` → Whisper API 的完整链路。
