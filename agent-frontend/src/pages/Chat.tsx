@@ -74,14 +74,36 @@ export default function Chat() {
               if (!jsonStr) continue;
               const data = JSON.parse(jsonStr);
               if (data.done) break
-              setMessages((prev) => {
-                const updated = [...prev]
-                const last = updated[updated.length - 1]
-                if (last.role === 'assistant') {
-                  updated[updated.length - 1] = { ...last, content: last.content + (data.content || '') }
-                }
-                return updated
-              })
+              if (data.event === 'tool_call') {
+                setMessages((prev) => {
+                  const updated = [...prev]
+                  const last = updated[updated.length - 1]
+                  if (last.role === 'assistant') {
+                    const toolNote = `\n\n🔧 正在使用 **${data.tool}** 查询...\n`
+                    updated[updated.length - 1] = { ...last, content: last.content + toolNote }
+                  }
+                  return updated
+                })
+              } else if (data.event === 'tool_result') {
+                setMessages((prev) => {
+                  const updated = [...prev]
+                  const last = updated[updated.length - 1]
+                  if (last.role === 'assistant') {
+                    const resultNote = `\n✅ **${data.tool}** 返回结果\n\n`
+                    updated[updated.length - 1] = { ...last, content: last.content + resultNote }
+                  }
+                  return updated
+                })
+              } else if (data.content) {
+                setMessages((prev) => {
+                  const updated = [...prev]
+                  const last = updated[updated.length - 1]
+                  if (last.role === 'assistant') {
+                    updated[updated.length - 1] = { ...last, content: last.content + data.content }
+                  }
+                  return updated
+                })
+              }
             } catch {}
           }
         }

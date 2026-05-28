@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS conv_conversation (
     user_id BIGINT,
     tenant_id BIGINT,
     agent_config_id BIGINT,
+    skill_id BIGINT,
     message_count INTEGER DEFAULT 0,
     parent_id BIGINT,
     summary TEXT,
@@ -152,6 +153,57 @@ CREATE TABLE IF NOT EXISTS orch_tool_def (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Skill module
+CREATE TABLE IF NOT EXISTS orch_skill (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    agent_config_id BIGINT,
+    workflow_id BIGINT,
+    tenant_id BIGINT,
+    enabled BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS orch_skill_tool (
+    id BIGSERIAL PRIMARY KEY,
+    skill_id BIGINT NOT NULL,
+    tool_def_id BIGINT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Seed: 4 built-in tools
+INSERT INTO orch_tool_def (id, name, description, parameters, tool_type, tenant_id) VALUES
+(1, 'web_search', '搜索互联网获取最新信息，返回网页摘要。适用于查新闻、实时数据、公开信息。', '{"query": "搜索关键词"}', 'built-in', NULL),
+(2, 'wikipedia', '查询维基百科获取百科知识。适用于概念解释、历史事件、人物背景。', '{"query": "查询关键词"}', 'built-in', NULL),
+(3, 'arxiv', '搜索arXiv学术论文库。适用于科研论文、技术文献查询。', '{"query": "搜索关键词"}', 'built-in', NULL),
+(4, 'calculator', '执行数学计算和表达式求值。适用于数值计算、单位换算等。', '{"expression": "数学表达式"}', 'built-in', NULL)
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed: 3 agent configs
+INSERT INTO orch_agent_config (id, name, description, model, system_prompt, temperature, max_tokens, tenant_id) VALUES
+(1, '联网搜索助手', '可联网查询最新信息，获取实时新闻和数据。', 'deepseek-chat', '你是一个智能助手，可以主动使用 web_search 工具搜索互联网获取最新信息。遇到需要实时数据、最新新闻或你不确定的信息时，请务必先搜索再回答。', 0.7, 2048, NULL),
+(2, '知识检索助手', '可查询维基百科和学术论文，获取深度知识。', 'deepseek-chat', '你是一个知识渊博的助手，可以使用 wikipedia 和 arxiv 工具查询百科知识和学术论文。对于概念性问题、历史事件、科学知识，请使用工具获取准确信息后回答。', 0.7, 2048, NULL),
+(3, '通用对话助手', '纯大语言模型对话，不使用外部工具。', 'deepseek-chat', '你是一个乐于助人的AI助手，回答各种问题，提供有用的建议。', 0.7, 2048, NULL)
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed: 3 skills
+INSERT INTO orch_skill (id, name, description, agent_config_id, tenant_id) VALUES
+(1, '联网搜索', '搜索互联网获取最新信息、实时新闻、天气、股价等时效性内容。当你需要查最新数据时使用此技能。', 1, NULL),
+(2, '知识查询', '查询维基百科百科条目和arXiv学术论文，获取深度知识。当你需要了解概念、历史、科学知识时使用此技能。', 2, NULL),
+(3, '通用对话', '纯文本对话，不使用外部工具。适用于闲聊、写作、翻译、编程等不需要外部信息的场景。', 3, NULL)
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed: skill-tool associations
+INSERT INTO orch_skill_tool (skill_id, tool_def_id) VALUES
+(1, 1)  -- 联网搜索 → web_search
+ON CONFLICT DO NOTHING;
+INSERT INTO orch_skill_tool (skill_id, tool_def_id) VALUES
+(2, 2),  -- 知识查询 → wikipedia
+(2, 3)   -- 知识查询 → arxiv
+ON CONFLICT DO NOTHING;
 
 -- Workflow module
 CREATE TABLE IF NOT EXISTS wf_workflow_def (

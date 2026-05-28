@@ -33,9 +33,10 @@ public class StreamingProxy {
         }
     }
 
-    /** 带上下文 + 图片 + 回调（Controller 使用，可收集完整回复） */
+    /** 带上下文 + 图片 + systemPrompt + 回调（Controller 使用，可收集完整回复） */
     public void streamChat(String userMessage, MemoryContext context,
                            Long conversationId, String modelName, String imageUrl,
+                           String systemPrompt,
                            SseEmitter emitter, ResponseCallback callback) {
         new Thread(() -> {
             StringBuilder fullResponse = new StringBuilder();
@@ -62,6 +63,9 @@ public class StreamingProxy {
                 body.put("model", modelName != null ? modelName : "deepseek-chat");
                 if (imageUrl != null && !imageUrl.isEmpty()) {
                     body.put("imageUrl", imageUrl);
+                }
+                if (systemPrompt != null && !systemPrompt.isEmpty()) {
+                    body.put("systemPrompt", systemPrompt);
                 }
 
                 String json = mapper.writeValueAsString(body);
@@ -118,8 +122,8 @@ public class StreamingProxy {
     /** 无回调版本 */
     public void streamChat(String userMessage, MemoryContext context,
                            Long conversationId, String modelName, String imageUrl,
-                           SseEmitter emitter) {
-        streamChat(userMessage, context, conversationId, modelName, imageUrl, emitter, null);
+                           String systemPrompt, SseEmitter emitter) {
+        streamChat(userMessage, context, conversationId, modelName, imageUrl, systemPrompt, emitter, null);
     }
 
     /** 兼容旧签名 */
@@ -134,6 +138,88 @@ public class StreamingProxy {
                     .toList()
                 : List.of(),
                 0),
-            conversationId, modelName, null, emitter, null);
+            conversationId, modelName, null, null, emitter, null);
+    }
+
+    /** 带工具调用的 Skill Agent 流式对话 */
+    public void streamSkillChat(String userMessage, MemoryContext context,
+                                Long conversationId, String modelName, String imageUrl,
+                                String systemPrompt, List<String> tools, String skillName,
+                                SseEmitter emitter, ResponseCallback callback) {
+        new Thread(() -> {
+            StringBuilder fullResponse = new StringBuilder();
+            try {
+                URI uri = URI.create(engineUrl + "/chat/agent");
+                HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(120000);
+
+                List<Map<String, String>> history = new ArrayList<>();
+                if (context.summary() != null && !context.summary().isEmpty()) {
+                    history.add(Map.of("role", "system", "content", context.summary()));
+                }
+                for (MessageInfo msg : context.messages()) {
+                    history.add(Map.of("role", msg.role(), "content", msg.content()));
+                }
+
+                Map<String, Object> body = new HashMap<>();
+                body.put("query", userMessage);
+                body.put("history", history);
+                body.put("model", modelName != null ? modelName : "deepseek-chat");
+                if (imageUrl != null && !imageUrl.isEmpty()) {
+                    body.put("imageUrl", imageUrl);
+                }
+                if (systemPrompt != null && !systemPrompt.isEmpty()) {
+                    body.put("systemPrompt", systemPrompt);
+                }
+                body.put("tools", tools != null ? tools : List.of());
+                body.put("skillName", skillName != null ? skillName : "");
+
+                String json = mapper.writeValueAsString(body);
+                log.info("StreamingProxy -> /chat/agent skill={} tools={}", skillName, tools);
+
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(json.getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                }
+
+                int status = conn.getResponseCode();
+                if (status != 200) {
+                    log.error("Python engine returned status {}", status);
+                    emitter.completeWithError(new RuntimeException("Engine error: HTTP " + status));
+                    return;
+                }
+
+                BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("data:")) {
+                        String data = line.substring(5).trim();
+                        try {
+                            var event = mapper.readValue(data, Map.class);
+                            emitter.send(SseEmitter.event().data(data));
+                            if (event.containsKey("content")) {
+                                String content = (String) event.get("content");
+                                if (content != null) fullResponse.append(content);
+                            }
+                            if (Boolean.TRUE.equals(event.get("done"))) break;
+                        } catch (Exception ignored) {}
+                    }
+                }
+                reader.close();
+                emitter.complete();
+                if (callback != null) callback.onComplete(fullResponse.toString());
+                log.info("SkillStream completed for conv {}, response {} chars",
+                    conversationId, fullResponse.length());
+            } catch (Exception e) {
+                log.error("SkillStream error for conv {}: {}", conversationId, e.getMessage());
+                emitter.completeWithError(e);
+                if (callback != null) callback.onError(e);
+            }
+        }).start();
     }
 }

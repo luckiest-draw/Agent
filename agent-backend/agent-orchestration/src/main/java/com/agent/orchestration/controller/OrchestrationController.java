@@ -3,11 +3,14 @@ package com.agent.orchestration.controller;
 import com.agent.common.Result;
 import com.agent.orchestration.entity.AgentConfig;
 import com.agent.orchestration.entity.PromptTemplate;
+import com.agent.orchestration.entity.Skill;
 import com.agent.orchestration.entity.ToolDef;
 import com.agent.orchestration.service.OrchestrationService;
+import com.agent.orchestration.service.SkillService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/orchestration")
@@ -79,6 +82,38 @@ public class OrchestrationController {
     @DeleteMapping("/tools/{id}")
     public Result<Void> deleteTool(@PathVariable Long id) {
         orchestrationService.deleteTool(id);
+        return Result.ok();
+    }
+
+    // Skill
+    @Autowired
+    private SkillService skillService;
+
+    @GetMapping("/skills")
+    public Result<List<Skill>> listSkills(@RequestHeader("X-Tenant-Id") Long tenantId) {
+        return Result.ok(skillService.listSkills(tenantId));
+    }
+
+    @PostMapping("/skills")
+    public Result<Skill> createSkill(@RequestBody Skill skill) {
+        return Result.ok(skillService.createSkill(skill));
+    }
+
+    @PutMapping("/skills/{id}")
+    public Result<Skill> updateSkill(@PathVariable Long id, @RequestBody Skill skill) {
+        Skill updated = skillService.updateSkill(id, skill);
+        return updated != null ? Result.ok(updated) : Result.fail(404, "Skill not found");
+    }
+
+    @DeleteMapping("/skills/{id}")
+    public Result<Void> deleteSkill(@PathVariable Long id) {
+        skillService.deleteSkill(id);
+        return Result.ok();
+    }
+
+    @PostMapping("/skills/{id}/tools")
+    public Result<Void> saveSkillTools(@PathVariable Long id, @RequestBody Map<String, List<Long>> body) {
+        skillService.saveSkillTools(id, body.getOrDefault("toolIds", List.of()));
         return Result.ok();
     }
 }

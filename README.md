@@ -38,7 +38,7 @@
 |------|------|
 | **前端** | React 18, TypeScript, Vite, Tailwind CSS, Shadcn/ui, Zustand, React Flow, Recharts |
 | **后端** | Java 17, Spring Boot 3.2.5, Spring Security, JWT (jjwt 0.12.5), MyBatis-Plus 3.5.9, Spring AMQP |
-| **AI 引擎** | Python 3.10+, FastAPI, LangChain, LangGraph, Celery, pgvector |
+| **AI 引擎** | Python 3.10+, FastAPI, LangChain, LangGraph, Celery, pgvector, DuckDuckGo-Search |
 | **数据库** | PostgreSQL 15 + pgvector 扩展, Redis 7 |
 | **消息队列** | RabbitMQ 3.12 |
 | **基础设施** | Docker Compose |
@@ -61,16 +61,19 @@ Agent/
 │   ├── agent-monitor/              # API 日志, Token 用量监控
 │   └── agent-gateway/              # Spring Boot 入口, CORS/WS/MQ 配置
 ├── agent-engine/                   # Python AI 引擎
-│   ├── main.py                     # FastAPI 入口 (含 /speech/transcribe, /rag/embed-single, /memory/summarize)
+│   ├── main.py                     # FastAPI 入口 (含 /speech/transcribe, /chat/agent, /skills/route)
 │   ├── config.py                   # Pydantic 配置
 │   ├── models/
 │   │   ├── model_manager.py        # 多模型路由 (OpenAI 兼容, 含 Gemini)
 │   │   └── multimodal.py           # 图片 Base64 编码 + 多模态消息构建
+│   ├── tools/
+│   │   └── tool_registry.py        # 工具注册表 (DuckDuckGo + Wikipedia + arXiv)
+│   ├── agents/
+│   │   ├── chat_agent.py           # 多轮对话 + 流式输出 (含视觉模型支持)
+│   │   └── skill_agent.py          # Tool Calling Agent + AgentExecutor 流式
 │   ├── rag/
 │   │   ├── vector_store.py         # Pgvector 集成
 │   │   └── retriever.py            # RAG 检索 + 提示词构建
-│   ├── agents/
-│   │   └── chat_agent.py           # 多轮对话 + 流式输出 (含视觉模型支持)
 │   ├── workflows/
 │   │   └── workflow_executor.py    # LangGraph DAG 执行器
 │   └── tasks/
@@ -99,7 +102,8 @@ Agent/
 - **多轮对话** — SSE 流式输出，RAG 增强，支持多模型切换
 - **图片视觉问答** — 聊天中上传图片，视觉模型 (GPT-4o/GLM-4v/Qwen-VL/Gemini) 理解并回答
 - **语音输入** — 浏览器录音 → OpenAI Whisper STT → 文字填入输入框 → LLM 文字回复
-- **Agent 编排** — 可配置的智能体，支持系统提示词、工具和模型选择
+- **Agent 编排** — 可配置智能体 + 工具定义 + Skill 封装（Agent+工具+工作流打包），支持语义路由自动匹配最佳技能
+- **Skill/Tool 系统** — 3 个内置免费工具（DuckDuckGo 搜索、Wikipedia 百科、arXiv 论文），Tool Calling Agent 自动决策何时调用工具，LLM 语义路由分发到匹配的 Skill
 - **可视化工作流** — React Flow 拖拽式 DAG 画布，节点类型：开始/智能体/工具/条件/结束
 - **监控看板** — Token 用量图表、API 调用日志、系统状态
 - **多租户 RBAC** — 租户隔离、JWT 认证、用户/角色/权限管理
@@ -234,6 +238,9 @@ npm run dev
 | POST | `/api/orchestration/agents` | 创建智能体配置 |
 | PUT | `/api/orchestration/templates/{id}` | 更新提示词模板 |
 | POST | `/api/orchestration/tools` | 创建工具定义 |
+| GET | `/api/orchestration/skills` | Skill 列表 |
+| POST | `/api/orchestration/skills` | 创建 Skill |
+| POST | `/api/orchestration/skills/{id}/tools` | 为 Skill 绑定工具 |
 
 ### 工作流
 | 方法 | 路径 | 说明 |
@@ -260,6 +267,9 @@ npm run dev
 | POST | `/rag/embed-single` | 单文本向量化（话题检测用） |
 | POST | `/memory/summarize` | 压缩旧消息为摘要 |
 | POST | `/speech/transcribe` | OpenAI Whisper 语音转文字 |
+| POST | `/chat/agent` | Skill Agent 流式对话（带工具调用） |
+| POST | `/skills/route` | 语义路由匹配最佳 Skill |
+| GET | `/skills/tools` | 列出内置工具 |
 | GET | `/models/supported` | 支持的模型列表 |
 | POST | `/workflow/execute` | 同步执行工作流 |
 

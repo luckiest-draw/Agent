@@ -30,6 +30,8 @@ class ChatRequest(BaseModel):
     useRag: bool = False
     topK: int = 5
     imageUrl: Optional[str] = None
+    tools: List[str] = []
+    skillName: Optional[str] = None
 
 
 class EmbeddingRequest(BaseModel):
@@ -106,6 +108,76 @@ async def rag_chat_endpoint(request: ChatRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
+
+
+# ==================== Skill Agent (Tool Calling) ====================
+
+@app.post("/chat/agent")
+async def skill_chat_endpoint(request: ChatRequest):
+    """带工具调用的 Agent 流式对话"""
+    from agents.skill_agent import skill_chat_stream
+
+    async def event_generator():
+        try:
+            async for sse in skill_chat_stream(
+                query=request.query,
+                history=request.history,
+                tools=request.tools,
+                system_prompt=request.systemPrompt,
+                model=request.model,
+                temperature=request.temperature,
+            ):
+                yield sse
+        except Exception as e:
+            logger.error(f"Skill agent error: {e}")
+            yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/skills/route")
+def route_skill(request: dict):
+    """根据用户消息路由到最匹配的 Skill（基于 embedding 相似度）"""
+    from rag.vector_store import create_embeddings
+    query = request.get("query", "")
+    skills = request.get("skills", [])  # [{"name": "...", "description": "..."}, ...]
+
+    if not skills or not query:
+        return {"skill": None, "score": 0.0, "reason": "no skills or empty query"}
+
+    emb = create_embeddings()
+    query_vec = emb.embed_query(query)
+    scores = []
+    for s in skills:
+        desc = s.get("description", "")
+        if not desc:
+            scores.append((s["name"], 0.0))
+            continue
+        skill_vec = emb.embed_query(desc)
+        dot = sum(a * b for a, b in zip(query_vec, skill_vec))
+        norm_a = sum(a * a for a in query_vec) ** 0.5
+        norm_b = sum(b * b for b in skill_vec) ** 0.5
+        sim = dot / (norm_a * norm_b) if norm_a > 0 and norm_b > 0 else 0.0
+        scores.append((s["name"], sim))
+
+    scores.sort(key=lambda x: x[1], reverse=True)
+    best = scores[0]
+    threshold = request.get("threshold", 0.7)
+    if best[1] >= threshold:
+        return {"skill": best[0], "score": round(best[1], 4), "matched": True}
+    return {"skill": None, "score": round(best[1], 4), "matched": False,
+            "reason": f"best match '{best[0]}' below threshold {threshold}"}
+
+
+@app.get("/skills/tools")
+def list_skill_tools():
+    """列出所有内置工具"""
+    from tools.tool_registry import list_tools
+    return {"tools": list_tools()}
 
 
 # ==================== RAG / Knowledge ====================

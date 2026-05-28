@@ -209,7 +209,50 @@ POST /api/auth/register  { username, password, email }
 - Java 端：`PDImageXObject` 从 PDF 页面资源中提取图片流
 - 知识库入库时自动检测，图片存入 `image_paths` 列（分号分隔）
 
+**Skill/Tool/Router 系统**：
 
+Skill 把 AgentConfig（角色定义）+ ToolDef（工具定义）打包成一个可路由的能力单元，解决散落的三个实体如何协同的问题。
+
+```
+用户消息 "帮我查一下今天的热点新闻"
+    │
+    ▼
+SkillRouter.route() (Java)
+    │  1. 加载所有 Skill 的 name + description
+    │  2. 调 Python /skills/route → embedding 匹配
+    │  3. "联网搜索" Skill 得分 0.88 (vs "知识查询" 0.31)
+    │
+    ├── 命中 → 加载 Skill.agentConfig.systemPrompt + tools: [web_search]
+    │         → StreamingProxy.streamSkillChat() → POST /chat/agent
+    └── 未命中 → 走 MemoryPipeline 通用对话
+        │
+        ▼
+[Python /chat/agent]
+    skill_agent.skill_chat_stream(query, history, tools=["web_search"], system_prompt=...)
+        │
+        create_tool_calling_agent(llm, tools, prompt)
+        │
+        AgentExecutor.astream_events()
+            ├── LLM 决定: tool_call web_search("今天热点新闻")
+            │     → SSE event: {"event":"tool_call","tool":"web_search",...}
+            ├── 实际执行 DuckDuckGo 搜索
+            │     → SSE event: {"event":"tool_result","tool":"web_search",...}
+            └── LLM 基于搜索结果生成最终回复
+                  → SSE event: {"content":"今天的热点新闻有...",...}
+```
+
+**Tool/ToolDef/Skill 的关系**：
+- `ToolDef` 是数据库表里的工具元数据（name, description, parameters），供 Java 侧 CRUD
+- `tools/tool_registry.py` 是 Python 侧的运行时工具实例，把工具名映射到 LangChain `BaseTool` 对象
+- `Skill` 通过 `orch_skill_tool` 关联表把多个 ToolDef 绑到自己的工具列表
+- 路由匹配用的是 Skill 的 description 字段，跟话题检测用 embedding 做余弦相似度
+
+**内置的 3 个免费工具**（零 API Key）：
+- `web_search` — DuckDuckGo 搜索，返回网页摘要
+- `wikipedia` — 维基百科查询，适用于概念解释
+- `arxiv` — arXiv 学术论文搜索
+
+> **设计决策**：MCP 暂未接入（`langchain-mcp-adapters` 与项目当前 `langchain-core 0.3.x` 不兼容，需要升级到 1.x），待后续版本兼容后再引入 MCP 生态的更多工具。
 
 **文档上传处理流水线**：
 ```
@@ -521,6 +564,8 @@ while (true) {
 | **DAG 工作流** | React Flow(前端) → MyBatis-Plus 实体(后端) → LangGraph(Python) |
 | **OpenAI 兼容 API** | 所有模型统一 `ChatOpenAI` 接口，模型名路由分配不同 base_url/api_key |
 | **LangChain 多模态** | `HumanMessage(content=[text_block, image_block])` 传入 base64 图片给视觉模型 |
+| **Tool Calling** | `create_tool_calling_agent` + `AgentExecutor`，LLM 自主决策调工具 → 执行 → 结果回喂 |
+| **Skill = Agent + Tools** | Skill 表 + 关联表打包 AgentConfig + ToolDefs，语义 Router 自动匹配最佳技能 |
 | **上传-引用模式** | 图片先上传到服务端获取 URL，消息体只传 URL 引用，避免大体积 JSON |
 | **React 不可变状态** | `{ ...obj, field: newValue }` 而非 `obj.field = newValue` |
 | **多模块 Maven** | 9 模块，`agent-gateway` 聚合启动，父 POM 统一版本管理 |

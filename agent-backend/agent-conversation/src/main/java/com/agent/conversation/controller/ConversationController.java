@@ -8,6 +8,7 @@ import com.agent.conversation.mapper.MessageMapper;
 import com.agent.conversation.memory.MemoryPipeline;
 import com.agent.conversation.memory.MemoryPipeline.MemoryContext;
 import com.agent.conversation.memory.PiiMasker;
+import com.agent.conversation.memory.SkillRouter;
 import com.agent.conversation.memory.TopicDetector;
 import com.agent.conversation.memory.TopicDetector.TopicDetectionResult;
 import com.agent.conversation.service.ChatService;
@@ -52,6 +53,9 @@ public class ConversationController {
     @Autowired
     private ImageUploadService imageUploadService;
 
+    @Autowired
+    private SkillRouter skillRouter;
+
     @Value("${memory.topic-detection.enabled:true}")
     private boolean topicDetectionEnabled;
 
@@ -94,23 +98,51 @@ public class ConversationController {
         List<Map<String, String>> history = (List<Map<String, String>>) body.getOrDefault("history", List.of());
 
         String imageUrl = (String) body.getOrDefault("imageUrl", null);
+        String systemPrompt = (String) body.getOrDefault("systemPrompt", null);
 
         String maskedQuery = piiMasker.mask(query);
+
+        // 技能路由：尝试匹配最合适的 Skill
+        SkillRouter.RouteResult skillRoute = skillRouter.route(maskedQuery);
+        String effectiveSystemPrompt = systemPrompt;
+        java.util.List<String> tools = java.util.List.of();
+        String matchedSkillName = null;
+
+        if (skillRoute != null) {
+            effectiveSystemPrompt = skillRoute.systemPrompt() != null
+                ? skillRoute.systemPrompt() : systemPrompt;
+            tools = skillRoute.toolNames();
+            matchedSkillName = skillRoute.skillName();
+        }
 
         Conversation conv = new Conversation();
         conv.setTitle(maskedQuery.length() > 30 ? maskedQuery.substring(0, 30) + "..." : maskedQuery);
         conv.setMessageCount(0);
+        if (skillRoute != null && skillRoute.skillContext() != null) {
+            conv.setSkillId(skillRoute.skillContext().skill().getId());
+        }
         conversationMapper.insert(conv);
 
         chatService.saveUserMessage(conv.getId(), maskedQuery, imageUrl);
         MemoryContext context = memoryPipeline.buildContext(conv.getId(), maskedQuery);
 
-        streamingProxy.streamChat(maskedQuery, context, conv.getId(), model, imageUrl, emitter,
-            (fullResponse) -> {
-                String maskedResponse = piiMasker.mask(fullResponse);
-                chatService.saveAssistantMessage(conv.getId(), maskedResponse);
-                memoryPipeline.afterResponse(conv.getId(), maskedQuery, maskedResponse);
-            });
+        if (skillRoute != null && !tools.isEmpty()) {
+            streamingProxy.streamSkillChat(maskedQuery, context, conv.getId(), model, imageUrl,
+                effectiveSystemPrompt, tools, matchedSkillName, emitter,
+                (fullResponse) -> {
+                    String maskedResponse = piiMasker.mask(fullResponse);
+                    chatService.saveAssistantMessage(conv.getId(), maskedResponse);
+                    memoryPipeline.afterResponse(conv.getId(), maskedQuery, maskedResponse);
+                });
+        } else {
+            streamingProxy.streamChat(maskedQuery, context, conv.getId(), model, imageUrl,
+                effectiveSystemPrompt, emitter,
+                (fullResponse) -> {
+                    String maskedResponse = piiMasker.mask(fullResponse);
+                    chatService.saveAssistantMessage(conv.getId(), maskedResponse);
+                    memoryPipeline.afterResponse(conv.getId(), maskedQuery, maskedResponse);
+                });
+        }
         return emitter;
     }
 
@@ -121,6 +153,7 @@ public class ConversationController {
         String rawMessage = body.get("message");
         String modelName = body.getOrDefault("modelName", null);
         String imageUrl = body.getOrDefault("imageUrl", null);
+        String systemPrompt = body.getOrDefault("systemPrompt", null);
 
         // 1. PII 脱敏
         String maskedMessage = piiMasker.mask(rawMessage);
@@ -139,20 +172,44 @@ public class ConversationController {
             }
         }
 
-        // 3. 保存用户消息
+        // 3. 技能路由
+        SkillRouter.RouteResult skillRoute = skillRouter.route(maskedMessage);
+        String effectiveSystemPrompt = systemPrompt;
+        java.util.List<String> tools = java.util.List.of();
+        String matchedSkillName = null;
+
+        if (skillRoute != null) {
+            effectiveSystemPrompt = skillRoute.systemPrompt() != null
+                ? skillRoute.systemPrompt() : systemPrompt;
+            tools = skillRoute.toolNames();
+            matchedSkillName = skillRoute.skillName();
+        }
+
+        // 4. 保存用户消息
         chatService.saveUserMessage(activeConvId, maskedMessage, imageUrl);
 
-        // 4. 构建上下文（Redis 滑动窗口 + Token 压缩）
+        // 5. 构建上下文（Redis 滑动窗口 + Token 压缩）
         MemoryContext context = memoryPipeline.buildContext(activeConvId, maskedMessage);
 
-        // 5. 发送流式请求，在回调中收集完整回复
+        // 6. 发送流式请求
         final Long finalConvId = activeConvId;
-        streamingProxy.streamChat(maskedMessage, context, activeConvId, modelName, imageUrl, emitter,
-            (fullResponse) -> {
-                String maskedResponse = piiMasker.mask(fullResponse);
-                chatService.saveAssistantMessage(finalConvId, maskedResponse);
-                memoryPipeline.afterResponse(finalConvId, maskedMessage, maskedResponse);
-            });
+        if (skillRoute != null && !tools.isEmpty()) {
+            streamingProxy.streamSkillChat(maskedMessage, context, activeConvId, modelName, imageUrl,
+                effectiveSystemPrompt, tools, matchedSkillName, emitter,
+                (fullResponse) -> {
+                    String maskedResponse = piiMasker.mask(fullResponse);
+                    chatService.saveAssistantMessage(finalConvId, maskedResponse);
+                    memoryPipeline.afterResponse(finalConvId, maskedMessage, maskedResponse);
+                });
+        } else {
+            streamingProxy.streamChat(maskedMessage, context, activeConvId, modelName, imageUrl,
+                effectiveSystemPrompt, emitter,
+                (fullResponse) -> {
+                    String maskedResponse = piiMasker.mask(fullResponse);
+                    chatService.saveAssistantMessage(finalConvId, maskedResponse);
+                    memoryPipeline.afterResponse(finalConvId, maskedMessage, maskedResponse);
+                });
+        }
         return emitter;
     }
 }

@@ -13,6 +13,7 @@ public class Conversation extends BaseEntity {
     private Long userId;
     private Long tenantId;
     private Long agentConfigId;
+    private Long skillId;
     private Integer messageCount = 0;
     private Long parentId;
     private String summary;
