@@ -311,5 +311,5 @@ npm run dev
 - **Python 做 AI 引擎**: 充分利用 LangChain/LangGraph 生态；Java 负责业务逻辑
 - **OpenAI 兼容 API**: 所有模型通过 ChatOpenAI 统一路由，切换模型无需改代码
 - **简化登录**: 学习项目不用 OAuth2/OIDC，采用 JWT 用户名密码认证
-- **LangGraph StateGraph**: 对话 Agent 基于 `create_react_agent` 构建 ReAct 循环（agent⇄tools 图结构），MemorySaver checkpoint 持久化每个节点状态，支持断点恢复与 Human-in-the-loop 中断
+- **LangGraph StateGraph + Review**: Agent 基于自定义 4 节点 StateGraph（agent→tools→review），ReAct 循环处理工具调用，review 节点审查输出质量，不合格自动打回重试（最多 3 次），最终放行时注入用户侧建议（模拟 Claude Code 回退风格）。MemorySaver checkpoint 持久化每个节点状态，支持断点恢复
 - **MCP 协议**: 通过 `langchain-mcp-adapters` 统一接入外部工具生态

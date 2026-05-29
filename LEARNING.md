@@ -230,26 +230,25 @@ SkillRouter.route() (Java)
 [Python /chat/agent]
     skill_agent.skill_chat_stream(query, history, tools=["web_search"], ...)
         │
-        create_react_agent(llm, tools, checkpointer=MemorySaver())
-        │   ┌─────────────────────────────────────┐
-        │   │  LangGraph StateGraph (ReAct 循环)   │
-        │   │                                     │
-        │   │  agent 节点 ──→ tools 节点            │
-        │   │     ↑              │                │
-        │   │     └──────────────┘                │
-        │   │  (循环直到 LLM 决定不再调工具)         │
-        │   │                                     │
-        │   │  每个节点执行后 → MemorySaver         │
-        │   │  自动 checkpoint 持久化状态            │
-        │   └─────────────────────────────────────┘
-        │
-        agent.astream_events(config={"thread_id": str(convId)})
-            ├── LLM 决定: tool_call web_search("今天热点新闻")
-            │     → SSE event: {"event":"tool_call","tool":"web_search",...}
-            ├── 实际执行 DuckDuckGo 搜索
-            │     → SSE event: {"event":"tool_result","tool":"web_search",...}
-            └── LLM 基于搜索结果生成最终回复
-                  → SSE event: {"content":"今天的热点新闻有...",...}
+        ┌──────────────────────────────────────────────────────┐
+        │  LangGraph StateGraph（4 节点）                       │
+        │                                                      │
+        │   START ──→ agent ──→ tools                         │
+        │                ↑        │    ReAct 循环               │
+        │                └────────┘    (调工具直到满意)          │
+        │                │                                     │
+        │                │ (不再调工具)                          │
+        │                ▼                                     │
+        │             review                                   │
+        │            ├── PASS → END                            │
+        │            └── FAIL → agent（最多 3 次）               │
+        │                 · retry 1: 换工具/换策略               │
+        │                 · retry 2: 最后通牒                    │
+        │                 · retry 3: 放行 + 注入用户建议          │
+        │                                                      │
+        │  MemorySaver: 每个节点自动 checkpoint                 │
+        │  thread_id: conversation_id 隔离会话                  │
+        └──────────────────────────────────────────────────────┘
 ```
 
 **Tool/ToolDef/Skill 的关系**：
@@ -263,7 +262,12 @@ SkillRouter.route() (Java)
 - `wikipedia` — 维基百科查询，适用于概念解释
 - `arxiv` — arXiv 学术论文搜索
 
-> **设计决策**：LangGraph 1.0 标准范式——`create_react_agent` 构建 ReAct 图循环（agent⇄tools），`MemorySaver` 自动 checkpoint 持久化每个节点状态（通过 `thread_id` 隔离会话）。`interrupt_before=["tools"]` 支持 Human-in-the-loop（执行工具前暂停等人工确认，可选开关）。MCP 协议通过 `langchain-mcp-adapters` 已就绪。
+> **设计决策**：自定义 StateGraph 四节点（agent → tools → review → END/agent）。不再依赖 `create_react_agent` 预置图，手动构建以获得审查节点插入能力。MemorySaver 自动 checkpoint，thread_id 隔离会话，MCP 协议已就绪。
+
+**Review 节点的三层回退**：
+- **retry 1 (FAIL)**：审查 LLM 给出具体修改建议，agent 收到 `[审查未通过]` SystemMessage，引导换工具/换策略重新检索
+- **retry 2 (FAIL)**：最后通告，告知 LLM 如本轮仍不能通过审查，须诚实说明无法获取准确信息
+- **retry 3（放行）**：接受回复，自动注入用户侧建议（"更换网络环境"、"换个搜索词重试"），模拟 Claude Code 风格
 
 **文档上传处理流水线**：
 ```
