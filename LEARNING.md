@@ -228,11 +228,22 @@ SkillRouter.route() (Java)
         │
         ▼
 [Python /chat/agent]
-    skill_agent.skill_chat_stream(query, history, tools=["web_search"], system_prompt=...)
+    skill_agent.skill_chat_stream(query, history, tools=["web_search"], ...)
         │
-        create_tool_calling_agent(llm, tools, prompt)
+        create_react_agent(llm, tools, checkpointer=MemorySaver())
+        │   ┌─────────────────────────────────────┐
+        │   │  LangGraph StateGraph (ReAct 循环)   │
+        │   │                                     │
+        │   │  agent 节点 ──→ tools 节点            │
+        │   │     ↑              │                │
+        │   │     └──────────────┘                │
+        │   │  (循环直到 LLM 决定不再调工具)         │
+        │   │                                     │
+        │   │  每个节点执行后 → MemorySaver         │
+        │   │  自动 checkpoint 持久化状态            │
+        │   └─────────────────────────────────────┘
         │
-        AgentExecutor.astream_events()
+        agent.astream_events(config={"thread_id": str(convId)})
             ├── LLM 决定: tool_call web_search("今天热点新闻")
             │     → SSE event: {"event":"tool_call","tool":"web_search",...}
             ├── 实际执行 DuckDuckGo 搜索
@@ -252,7 +263,7 @@ SkillRouter.route() (Java)
 - `wikipedia` — 维基百科查询，适用于概念解释
 - `arxiv` — arXiv 学术论文搜索
 
-> **设计决策**：已升级 LangChain 全家桶到 1.0 稳定版（langchain 1.0.8 + langgraph 1.0.10 + langchain-mcp-adapters 0.1.14），MCP 协议已就绪。Agent API 从 `langchain.agents` 迁移到 `langchain_classic.agents`。
+> **设计决策**：LangGraph 1.0 标准范式——`create_react_agent` 构建 ReAct 图循环（agent⇄tools），`MemorySaver` 自动 checkpoint 持久化每个节点状态（通过 `thread_id` 隔离会话）。`interrupt_before=["tools"]` 支持 Human-in-the-loop（执行工具前暂停等人工确认，可选开关）。MCP 协议通过 `langchain-mcp-adapters` 已就绪。
 
 **文档上传处理流水线**：
 ```
@@ -564,7 +575,8 @@ while (true) {
 | **DAG 工作流** | React Flow(前端) → MyBatis-Plus 实体(后端) → LangGraph(Python) |
 | **OpenAI 兼容 API** | 所有模型统一 `ChatOpenAI` 接口，模型名路由分配不同 base_url/api_key |
 | **LangChain 多模态** | `HumanMessage(content=[text_block, image_block])` 传入 base64 图片给视觉模型 |
-| **Tool Calling** | `create_tool_calling_agent` + `AgentExecutor`，LLM 自主决策调工具 → 执行 → 结果回喂 |
+| **Tool Calling** | `create_react_agent` (LangGraph StateGraph) + `MemorySaver` checkpoint，ReAct 图循环（agent⇄tools） |
+| **Checkpoint** | 每个节点执行后自动持久化到 MemorySaver，`thread_id` 隔离会话，支持断点恢复和 Human-in-the-loop |
 | **Skill = Agent + Tools** | Skill 表 + 关联表打包 AgentConfig + ToolDefs，语义 Router 自动匹配最佳技能 |
 | **上传-引用模式** | 图片先上传到服务端获取 URL，消息体只传 URL 引用，避免大体积 JSON |
 | **React 不可变状态** | `{ ...obj, field: newValue }` 而非 `obj.field = newValue` |

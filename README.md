@@ -38,7 +38,7 @@
 |------|------|
 | **前端** | React 18, TypeScript, Vite, Tailwind CSS, Shadcn/ui, Zustand, React Flow, Recharts |
 | **后端** | Java 17, Spring Boot 3.2.5, Spring Security, JWT (jjwt 0.12.5), MyBatis-Plus 3.5.9, Spring AMQP |
-| **AI 引擎** | Python 3.10+, FastAPI, LangChain 1.0, LangGraph 1.0, Celery, pgvector, MCP, DuckDuckGo-Search |
+| **AI 引擎** | Python 3.10+, FastAPI, LangChain 1.0, LangGraph 1.0 (StateGraph + Checkpoint), MCP, DuckDuckGo-Search |
 | **数据库** | PostgreSQL 15 + pgvector 扩展, Redis 7 |
 | **消息队列** | RabbitMQ 3.12 |
 | **基础设施** | Docker Compose |
@@ -104,7 +104,7 @@ Agent/
 - **语音输入** — 浏览器录音 → OpenAI Whisper STT → 文字填入输入框 → LLM 文字回复
 - **Agent 编排** — 可配置智能体 + 工具定义 + Skill 封装（Agent+工具+工作流打包），支持语义路由自动匹配最佳技能
 - **Skill/Tool 系统** — 3 个内置免费工具（DuckDuckGo 搜索、Wikipedia 百科、arXiv 论文），Tool Calling Agent 自动决策何时调用工具，LLM 语义路由分发到匹配的 Skill
-- **可视化工作流** — React Flow 拖拽式 DAG 画布，节点类型：开始/智能体/工具/条件/结束
+- **可视化工作流** — React Flow 拖拽式 DAG 画布，LangGraph StateGraph 编译为可执行 DAG
 - **监控看板** — Token 用量图表、API 调用日志、系统状态
 - **多租户 RBAC** — 租户隔离、JWT 认证、用户/角色/权限管理
 
@@ -311,3 +311,5 @@ npm run dev
 - **Python 做 AI 引擎**: 充分利用 LangChain/LangGraph 生态；Java 负责业务逻辑
 - **OpenAI 兼容 API**: 所有模型通过 ChatOpenAI 统一路由，切换模型无需改代码
 - **简化登录**: 学习项目不用 OAuth2/OIDC，采用 JWT 用户名密码认证
+- **LangGraph StateGraph**: 对话 Agent 基于 `create_react_agent` 构建 ReAct 循环（agent⇄tools 图结构），MemorySaver checkpoint 持久化每个节点状态，支持断点恢复与 Human-in-the-loop 中断
+- **MCP 协议**: 通过 `langchain-mcp-adapters` 统一接入外部工具生态
