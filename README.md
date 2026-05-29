@@ -38,7 +38,7 @@
 |------|------|
 | **前端** | React 18, TypeScript, Vite, Tailwind CSS, Shadcn/ui, Zustand, React Flow, Recharts |
 | **后端** | Java 17, Spring Boot 3.2.5, Spring Security, JWT (jjwt 0.12.5), MyBatis-Plus 3.5.9, Spring AMQP |
-| **AI 引擎** | Python 3.10+, FastAPI, LangChain, LangGraph, Celery, pgvector, DuckDuckGo-Search |
+| **AI 引擎** | Python 3.10+, FastAPI, LangChain 1.0, LangGraph 1.0, Celery, pgvector, MCP, DuckDuckGo-Search |
 | **数据库** | PostgreSQL 15 + pgvector 扩展, Redis 7 |
 | **消息队列** | RabbitMQ 3.12 |
 | **基础设施** | Docker Compose |

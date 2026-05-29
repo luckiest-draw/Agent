@@ -252,7 +252,7 @@ SkillRouter.route() (Java)
 - `wikipedia` — 维基百科查询，适用于概念解释
 - `arxiv` — arXiv 学术论文搜索
 
-> **设计决策**：MCP 暂未接入（`langchain-mcp-adapters` 与项目当前 `langchain-core 0.3.x` 不兼容，需要升级到 1.x），待后续版本兼容后再引入 MCP 生态的更多工具。
+> **设计决策**：已升级 LangChain 全家桶到 1.0 稳定版（langchain 1.0.8 + langgraph 1.0.10 + langchain-mcp-adapters 0.1.14），MCP 协议已就绪。Agent API 从 `langchain.agents` 迁移到 `langchain_classic.agents`。
 
 **文档上传处理流水线**：
 ```

@@ -1,6 +1,6 @@
 # Skill Agent: tool-calling agent with streaming support
 from typing import AsyncIterator, List, Dict, Optional
-from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from models.model_manager import create_llm
