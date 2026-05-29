@@ -17,6 +17,7 @@ _checkpointer = MemorySaver()
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     review_count: int
+    review_history: str  # 累积审查反馈，便于追踪
 
 
 def _build_messages(query: str, history: List[Dict], system_prompt: str = None) -> list:
@@ -46,10 +47,14 @@ async def skill_chat_stream(
 ) -> AsyncIterator[str]:
     """LangGraph StateGraph: agent ⇄ tools ⇄ review
 
-    三个节点：
-    - agent: LLM 决策（调工具 or 生成回复）
+    四节点：
+    - agent: LLM 决策（调工具 → 生成回复）
     - tools: 执行工具调用
-    - review: 审查 agent 的最终回复，不合格打回重写（最多 2 次）
+    - review: 审查回复质量
+      · PASS → END
+      · FAIL → 注入反馈 → agent 重试（换工具/换策略）
+      · 最多 3 次重试，全部失败 → 告知用户原因 + 建议方案
+       （如 Claude Code：网页搜不到就换搜索引擎，都搜不到就建议用户检查网络）
     """
     model_name = model or "deepseek-chat"
     llm = create_llm(model_name=model_name, temperature=temperature, streaming=True)
@@ -65,13 +70,14 @@ async def skill_chat_stream(
     default_system = (
         "你是一个智能助手，可以使用工具来获取信息。"
         "当需要查询实时数据、百科知识或学术论文时，主动使用工具。"
+        "如果某个工具返回了空结果或报错，尝试用其他工具获取信息。"
         "回复时要引用工具返回的信息来源。"
     )
     sp = system_prompt or default_system
     llm_with_tools = llm.bind_tools(tool_instances)
 
-    # 审查用 LLM（非流式，只判断 PASS/FAIL）
-    review_llm = create_llm(model_name=model_name, temperature=0.0, max_tokens=256, streaming=False)
+    # 审查用 LLM（非流式）
+    review_llm = create_llm(model_name=model_name, temperature=0.0, max_tokens=512, streaming=False)
 
     def agent_node(state: AgentState):
         response = llm_with_tools.invoke(state["messages"])
@@ -79,20 +85,19 @@ async def skill_chat_stream(
 
     def review_node(state: AgentState):
         count = state.get("review_count", 0)
-        if count >= 2:
-            logger.info("Review: max retries reached, accepting output")
-            return {"review_count": count}
-
         messages = state["messages"]
+
+        # 提取最后一个纯文本 AI 回复
         last_ai = [m for m in messages if isinstance(m, AIMessage)
                    and hasattr(m, "content") and m.content
                    and not (hasattr(m, "tool_calls") and m.tool_calls)]
         if not last_ai:
-            return {"review_count": count}
+            return {"review_count": count, "review_history": state.get("review_history", "")}
 
         draft = last_ai[-1].content
+        prev_history = state.get("review_history", "")
 
-        # 提取工具调用结果作为审查依据
+        # 提取工具结果作为审查依据
         tool_msgs = [m for m in messages if hasattr(m, "type") and m.type == "tool"]
         tool_context = ""
         if tool_msgs:
@@ -100,7 +105,34 @@ async def skill_chat_stream(
                 f"- {m.content[:300]}" for m in tool_msgs[-5:]
             )
 
-        review_prompt = f"""你是一个质量审查员。请审查以下 AI 回复是否存在问题：{tool_context}
+        # 检查工具是否全部失败
+        tool_errors = any(
+            "error" in (m.content or "").lower()
+            or "failed" in (m.content or "").lower()
+            or "no results" in (m.content or "").lower()
+            for m in tool_msgs[-3:]
+        ) if tool_msgs else False
+
+        # 最后一次审查：接受回复，但要加上失败说明
+        if count >= 3:
+            logger.info("Review: max retries (%d) reached", count)
+            if tool_errors:
+                fallback = (
+                    "\n\n---\n⚠️ **本次回复可能不够理想**：工具多次查询未能获取完整数据。"
+                    "\n建议你：\n"
+                    + ("- 尝试更换搜索引擎或网络环境后重试\n" if "搜索" in " ".join(tools) else "")
+                    + "- 换个更具体的搜索词重新提问\n"
+                    + "- 如果问题持续，可能是外部服务暂时不可用，稍后再试"
+                )
+                return {
+                    "messages": [AIMessage(content=draft + fallback)],
+                    "review_count": count + 1,
+                    "review_history": prev_history,
+                }
+            # 普通审查已达上限，直接放行
+            return {"review_count": count + 1, "review_history": prev_history}
+
+        review_prompt = f"""你是一个质量审查员。审查以下 AI 回复是否存在问题：{tool_context}
 
 AI 回复：
 {draft[:1500]}
@@ -108,29 +140,60 @@ AI 回复：
 检查项：
 1. 是否基于工具返回的信息作答（不是凭空编造）
 2. 是否有事实错误或逻辑矛盾
-3. 是否直接回答了用户问题（不是答非所问）
+3. 是否遗漏了重要的工具查询结果
+4. 如果工具返回为空或报错，是否尝试了替代方案
 
 仅回复 PASS 或 FAIL: <问题简述>"""
 
         review_resp = review_llm.invoke([HumanMessage(content=review_prompt)])
         verdict = review_resp.content.strip()
-        logger.info("Review #%d: %s", count + 1, verdict[:120])
+        logger.info("Review #%d (tool_error=%s): %s", count + 1, tool_errors, verdict[:150])
 
         if verdict.upper().startswith("PASS"):
-            return {"review_count": count + 1}
-        else:
-            feedback = SystemMessage(
-                content=f"[审查未通过] {verdict}\n请根据以上反馈重新生成回复，确保基于工具返回的信息作答。"
+            return {
+                "review_count": count + 1,
+                "review_history": prev_history + f"\n[#%d PASS] {verdict[:100]}" % (count + 1),
+            }
+
+        # FAIL：生成可操作的改进指令
+        fix_instruction = (
+            f"[审查未通过 #{count + 1}/3] {verdict}\n"
+        )
+        if tool_errors:
+            fix_instruction += (
+                "工具查询未能获取有效结果。请尝试：\n"
+                + ("- 换一个搜索词或改用其他工具\n" if len(tool_instances) > 1 else "")
+                + "- 缩小或扩大搜索范围重新查询\n"
+                + "- 如果所有工具都不可用，告知用户可能的原因并建议检查网络连接\n"
             )
-            return {"messages": [feedback], "review_count": count + 1}
+        else:
+            fix_instruction += (
+                "请重新生成回复，确保：\n"
+                "- 严格基于工具返回的信息作答\n"
+                "- 先核实再回答，不要猜测\n"
+                + ("- 如某个工具未返回结果，尝试用其他工具\n" if len(tool_instances) > 1 else "")
+            )
+
+        if count == 2:  # 最后一次机会
+            fix_instruction += (
+                "\n注意：这是最后一次重试机会。如果仍然无法通过审查，"
+                "请在回复中诚实告知用户目前无法获取准确信息，并给出可行的替代建议。"
+            )
+
+        feedback = SystemMessage(content=fix_instruction)
+        return {
+            "messages": [feedback],
+            "review_count": count + 1,
+            "review_history": prev_history + f"\n[#{count + 1} FAIL] {verdict[:100]}",
+        }
 
     def after_review(state: AgentState):
-        """判断审查后走哪条路"""
+        """审查后路由"""
         messages = state.get("messages", [])
         if not messages:
             return END
         last = messages[-1]
-        if isinstance(last, SystemMessage) and "[审查未通过]" in (last.content or ""):
+        if isinstance(last, SystemMessage) and "[审查未通过" in (last.content or ""):
             return "agent"
         return END
 
@@ -155,7 +218,7 @@ AI 回复：
     accumulated_output = ""
     try:
         async for event in graph.astream_events(
-            {"messages": initial_messages, "review_count": 0},
+            {"messages": initial_messages, "review_count": 0, "review_history": ""},
             config=config,
             version="v2",
         ):
