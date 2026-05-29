@@ -32,6 +32,7 @@ class ChatRequest(BaseModel):
     imageUrl: Optional[str] = None
     tools: List[str] = []
     skillName: Optional[str] = None
+    conversationId: Optional[str] = None
 
 
 class EmbeddingRequest(BaseModel):
@@ -126,6 +127,7 @@ async def skill_chat_endpoint(request: ChatRequest):
                 system_prompt=request.systemPrompt,
                 model=request.model,
                 temperature=request.temperature,
+                conversation_id=request.conversationId or "default",
             ):
                 yield sse
         except Exception as e:

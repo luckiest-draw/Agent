@@ -177,6 +177,7 @@ public class StreamingProxy {
                 }
                 body.put("tools", tools != null ? tools : List.of());
                 body.put("skillName", skillName != null ? skillName : "");
+                body.put("conversationId", String.valueOf(conversationId));
 
                 String json = mapper.writeValueAsString(body);
                 log.info("StreamingProxy -> /chat/agent skill={} tools={}", skillName, tools);
