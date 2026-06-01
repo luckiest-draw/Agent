@@ -37,14 +37,24 @@ MCP_SERVER_CONFIGS = {
         "description": "查询 PostgreSQL 数据库（只读）",
         "enabled": False,  # 开启前确保数据库在运行
     },
-    # Brave Search：高质量联网搜索（免费额度 2000次/月）
-    # ▶ 注册获取 API Key: https://brave.com/search/api/
-    # "brave_search": {
+    # Tavily Search：AI 优化的联网搜索（免费 1000次/月）
+    # ▶ 注册获取 API Key: https://tavily.com
+    # "tavily_search": {
     #     "command": "npx",
-    #     "args": ["-y", "@anthropic-ai/mcp-server-brave-search"],
+    #     "args": ["-y", "tavily-mcp"],
     #     "transport": "stdio",
-    #     "env": {"BRAVE_API_KEY": "${BRAVE_API_KEY}"},
-    #     "description": "Brave 搜索引擎（高质量搜索结果）",
+    #     "env": {"TAVILY_API_KEY": "${TAVILY_API_KEY}"},
+    #     "description": "Tavily 搜索（AI 优化，结果直接可用）",
+    #     "enabled": False,
+    # },
+    # SearXNG：自托管搜索引擎聚合器，完全免费无需API Key
+    # ▶ 启动: docker run -d -p 8888:8888 searxng/searxng
+    # "searxng": {
+    #     "command": "python",
+    #     "args": ["-m", "mcp_server_freesearch"],
+    #     "transport": "stdio",
+    #     "env": {"SEARXNG_URL": "http://localhost:8888"},
+    #     "description": "SearXNG 自托管搜索（完全免费，多引擎聚合）",
     #     "enabled": False,
     # },
     # Sequential Thinking：复杂推理（结构化分步思考）
