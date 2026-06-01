@@ -176,10 +176,17 @@ def route_skill(request: dict):
 
 
 @app.get("/skills/tools")
-def list_skill_tools():
-    """列出所有内置工具"""
-    from tools.tool_registry import list_tools
-    return {"tools": list_tools()}
+async def list_all_tools():
+    """列出所有工具（内置 + MCP）"""
+    from tools.tool_registry import list_all_tools
+    return {"tools": await list_all_tools()}
+
+
+@app.get("/mcp/servers")
+def list_mcp_servers():
+    """列出已配置的 MCP 服务器"""
+    from tools.mcp_manager import list_mcp_servers, get_mcp_tool_names
+    return {"servers": list_mcp_servers(), "loaded_tools": get_mcp_tool_names()}
 
 
 @app.get("/models/health")

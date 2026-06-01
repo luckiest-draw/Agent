@@ -214,7 +214,7 @@ async def skill_chat_stream(
     """LangGraph Agent + 三态熔断 + 优先级降级 + 首包探测"""
     model_name = model or "deepseek-chat"
     candidates = resolve_fallback(model_name)
-    tool_instances = get_tools(tools)
+    tool_instances = await get_tools(tools)
 
     if not tool_instances:
         from agents.chat_agent import chat_stream
