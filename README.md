@@ -38,7 +38,7 @@
 |------|------|
 | **前端** | React 18, TypeScript, Vite, Tailwind CSS, Shadcn/ui, Zustand, React Flow, Recharts |
 | **后端** | Java 17, Spring Boot 3.2.5, Spring Security, JWT (jjwt 0.12.5), MyBatis-Plus 3.5.9, Spring AMQP |
-| **AI 引擎** | Python 3.10+, FastAPI, LangChain 1.0, LangGraph 1.0 (StateGraph + Checkpoint), MCP, DuckDuckGo-Search |
+| **AI 引擎** | Python 3.10+, FastAPI, LangChain 1.0, LangGraph 1.0 (StateGraph + Checkpoint), MCP 协议, 三态熔断器 |
 | **数据库** | PostgreSQL 15 + pgvector 扩展, Redis 7 |
 | **消息队列** | RabbitMQ 3.12 |
 | **基础设施** | Docker Compose |
@@ -65,9 +65,11 @@ Agent/
 │   ├── config.py                   # Pydantic 配置
 │   ├── models/
 │   │   ├── model_manager.py        # 多模型路由 (OpenAI 兼容, 含 Gemini)
-│   │   └── multimodal.py           # 图片 Base64 编码 + 多模态消息构建
+│   │   ├── multimodal.py           # 图片 Base64 编码 + 多模态消息构建
+│   │   └── circuit_breaker.py      # 三态熔断器 + 优先级降级链 + 健康监控
 │   ├── tools/
-│   │   └── tool_registry.py        # 工具注册表 (DuckDuckGo + Wikipedia + arXiv)
+│   │   ├── tool_registry.py        # 工具注册表 (内置 + MCP 动态发现)
+│   │   └── mcp_manager.py          # MCP Server 管理器 (filesystem/GitHub/PostgreSQL)
 │   ├── agents/
 │   │   ├── chat_agent.py           # 多轮对话 + 流式输出 (含视觉模型支持)
 │   │   └── skill_agent.py          # Tool Calling Agent + AgentExecutor 流式
@@ -269,8 +271,10 @@ npm run dev
 | POST | `/speech/transcribe` | OpenAI Whisper 语音转文字 |
 | POST | `/chat/agent` | Skill Agent 流式对话（带工具调用） |
 | POST | `/skills/route` | 语义路由匹配最佳 Skill |
-| GET | `/skills/tools` | 列出内置工具 |
+| GET | `/skills/tools` | 列出所有工具（内置 + MCP） |
 | GET | `/models/supported` | 支持的模型列表 |
+| GET | `/models/health` | 模型熔断器健康状态 |
+| GET | `/mcp/servers` | MCP 服务器列表和已加载工具 |
 | POST | `/workflow/execute` | 同步执行工作流 |
 
 ## 环境变量
@@ -312,4 +316,5 @@ npm run dev
 - **OpenAI 兼容 API**: 所有模型通过 ChatOpenAI 统一路由，切换模型无需改代码
 - **简化登录**: 学习项目不用 OAuth2/OIDC，采用 JWT 用户名密码认证
 - **LangGraph StateGraph + Review**: Agent 基于自定义 4 节点 StateGraph（agent→tools→review），ReAct 循环处理工具调用，review 节点审查输出质量，不合格自动打回重试（最多 3 次），最终放行时注入用户侧建议（模拟 Claude Code 回退风格）。MemorySaver checkpoint 持久化每个节点状态，支持断点恢复
-- **MCP 协议**: 通过 `langchain-mcp-adapters` 统一接入外部工具生态
+- **MCP 协议**: `MultiServerMCPClient` 管理多个 MCP Server（filesystem + GitHub + PostgreSQL），懒加载 + 10s 连接超时 + 缓存，与内置工具统一路由
+- **熔断降级**: 三态熔断器（Closed→Open→Half-Open），连续 3 次失败自动熔断，冷却后试探恢复。14 个模型按优先级降级链切换，备选模型降能力保可用（temperature↓、max_tokens↓），8s 首包探测超时判定模型不健康

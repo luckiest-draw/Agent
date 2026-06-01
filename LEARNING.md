@@ -269,6 +269,32 @@ SkillRouter.route() (Java)
 - **retry 2 (FAIL)**：最后通告，告知 LLM 如本轮仍不能通过审查，须诚实说明无法获取准确信息
 - **retry 3（放行）**：接受回复，自动注入用户侧建议（"更换网络环境"、"换个搜索词重试"），模拟 Claude Code 风格
 
+**三态熔断器与优先级降级链**：
+
+```
+模型调用请求
+  │
+  ├── CircuitBreaker.allow_request()
+  │     ├── CLOSED → 放行
+  │     ├── OPEN → 拒绝，跳过该模型
+  │     └── HALF_OPEN → 放行一个试探请求
+  │
+  ├── 首包探测: 8s 内收不到第一个 token → TimeoutError → 换模型
+  │
+  ├── 成功 → record_success() → CLOSED
+  └── 失败 → record_failure() → 连续 3 次 → OPEN（冷却 30s）
+                                  → HALF_OPEN 失败 → OPEN（冷却翻倍，最大 5min）
+
+降级链: [GPT-4o] → [DeepSeek-V4 temp↓] → [Qwen-Max temp↓ max_tokens↓]
+         首选              降能力保可用               进一步降级
+```
+
+**MCP 工具动态发现**：
+- `tool_registry.py`：`get_tools()` 异步方法，合并内置工具 + MCP 动态加载
+- `mcp_manager.py`：`MultiServerMCPClient` 管理多个 MCP Server，配置化启用/关闭
+- 已配置 3 个 Server（2 启用 + 1 待开启）：filesystem（文件读写）、GitHub（API 操作）、PostgreSQL（数据库查询）
+- 环境变量解析：`${VAR_NAME}` → `os.environ`，支持 API Key 注入
+
 **文档上传处理流水线**：
 ```
 上传文件 → PENDING → PARSING → CHUNKING → DONE
@@ -582,6 +608,8 @@ while (true) {
 | **Tool Calling** | `create_react_agent` (LangGraph StateGraph) + `MemorySaver` checkpoint，ReAct 图循环（agent⇄tools） |
 | **Checkpoint** | 每个节点执行后自动持久化到 MemorySaver，`thread_id` 隔离会话，支持断点恢复和 Human-in-the-loop |
 | **Skill = Agent + Tools** | Skill 表 + 关联表打包 AgentConfig + ToolDefs，语义 Router 自动匹配最佳技能 |
+| **Circuit Breaker** | 三态熔断（Closed→Open→Half-Open），连续失败阈值触发 + 冷却恢复 + 试探探活，配合 14 模型优先级降级链 |
+| **MCP 协议** | `MultiServerMCPClient` 统一管理外部 MCP Server，懒加载 + 超时 + 缓存，与内置工具无缝合并 |
 | **上传-引用模式** | 图片先上传到服务端获取 URL，消息体只传 URL 引用，避免大体积 JSON |
 | **React 不可变状态** | `{ ...obj, field: newValue }` 而非 `obj.field = newValue` |
 | **多模块 Maven** | 9 模块，`agent-gateway` 聚合启动，父 POM 统一版本管理 |
