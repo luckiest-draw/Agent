@@ -9,20 +9,50 @@ logger = logging.getLogger("mcp_manager")
 # transport="stdio": 本地子进程方式启动 MCP Server
 # transport="sse": 远程 HTTP SSE 方式连接
 MCP_SERVER_CONFIGS = {
+    # 文件系统：读写本地文件，已启用
     "filesystem": {
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem",
-                 "."],  # 允许访问当前工作目录
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
         "transport": "stdio",
         "description": "读写本地文件系统",
         "enabled": True,
     },
-    # 示例：Web Search MCP（需要 Node.js）
-    # "websearch": {
+    # GitHub：PR/Issue/代码操作，需设置 GITHUB_PERSONAL_ACCESS_TOKEN 环境变量
+    "github": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "transport": "stdio",
+        "env": {
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}",
+        },
+        "description": "GitHub API：搜索代码、管理PR/Issue、查看仓库",
+        "enabled": True,
+    },
+    # PostgreSQL：执行数据库查询
+    "postgres": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-postgres",
+                 "postgresql://agent:agent123@localhost:5432/agent_platform"],
+        "transport": "stdio",
+        "description": "查询 PostgreSQL 数据库（只读）",
+        "enabled": False,  # 开启前确保数据库在运行
+    },
+    # Brave Search：高质量联网搜索（免费额度 2000次/月）
+    # ▶ 注册获取 API Key: https://brave.com/search/api/
+    # "brave_search": {
     #     "command": "npx",
-    #     "args": ["-y", "@iflow-mcp/open-websearch"],
+    #     "args": ["-y", "@anthropic-ai/mcp-server-brave-search"],
     #     "transport": "stdio",
-    #     "description": "联网搜索（多搜索引擎）",
+    #     "env": {"BRAVE_API_KEY": "${BRAVE_API_KEY}"},
+    #     "description": "Brave 搜索引擎（高质量搜索结果）",
+    #     "enabled": False,
+    # },
+    # Sequential Thinking：复杂推理（结构化分步思考）
+    # "sequential_thinking": {
+    #     "command": "npx",
+    #     "args": ["-y", "@anthropic-ai/mcp-server-sequential-thinking"],
+    #     "transport": "stdio",
+    #     "description": "结构化分步思考，适合复杂问题推理",
     #     "enabled": False,
     # },
 }
@@ -33,22 +63,34 @@ _client = None
 
 
 def _build_client_config() -> dict:
-    """构建 MultiServerMCPClient 所需的配置"""
+    """构建 MultiServerMCPClient 所需的配置，解析环境变量占位符"""
+    import os
+    import re
+
+    def resolve_env(value: str) -> str:
+        """替换 ${VAR_NAME} 为实际环境变量值"""
+        pattern = re.compile(r'\$\{(\w+)\}')
+        matches = pattern.findall(value)
+        for var in matches:
+            env_val = os.environ.get(var, "")
+            if not env_val:
+                logger.warning("Env var %s not set for MCP config", var)
+            value = value.replace(f"${{{var}}}", env_val)
+        return value
+
     config = {}
     for name, cfg in MCP_SERVER_CONFIGS.items():
         if not cfg.get("enabled", True):
             continue
+        entry = {"transport": cfg["transport"]}
         if cfg["transport"] == "stdio":
-            config[name] = {
-                "command": cfg["command"],
-                "args": cfg["args"],
-                "transport": "stdio",
-            }
+            entry["command"] = cfg["command"]
+            entry["args"] = cfg["args"]
+            if "env" in cfg:
+                entry["env"] = {k: resolve_env(v) for k, v in cfg["env"].items()}
         elif cfg["transport"] == "sse":
-            config[name] = {
-                "url": cfg["url"],
-                "transport": "sse",
-            }
+            entry["url"] = cfg["url"]
+        config[name] = entry
     return config
 
 
