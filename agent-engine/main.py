@@ -182,6 +182,14 @@ def list_skill_tools():
     return {"tools": list_tools()}
 
 
+@app.get("/models/health")
+def models_health():
+    """三态熔断器状态：查看各模型的健康状态"""
+    from models.circuit_breaker import health_monitor
+    statuses = health_monitor.all_status()
+    return {"models": statuses, "total": len(statuses)}
+
+
 # ==================== RAG / Knowledge ====================
 
 @app.post("/rag/retrieve")
