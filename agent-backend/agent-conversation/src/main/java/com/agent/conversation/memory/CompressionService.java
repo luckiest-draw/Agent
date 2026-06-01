@@ -22,9 +22,12 @@ public class CompressionService {
     private String engineUrl;
 
     private final MessageCacheService cacheService;
+    private final com.agent.conversation.mapper.ConversationMapper conversationMapper;
 
-    public CompressionService(MessageCacheService cacheService) {
+    public CompressionService(MessageCacheService cacheService,
+                              com.agent.conversation.mapper.ConversationMapper conversationMapper) {
         this.cacheService = cacheService;
+        this.conversationMapper = conversationMapper;
     }
 
     /**
@@ -45,6 +48,12 @@ public class CompressionService {
         String newSummary = compress(older, existingSummary);
 
         cacheService.setSummary(conversationId, newSummary);
+        // 持久化到 PostgreSQL，Redis TTL 过期后可从 DB 恢复
+        var conv = conversationMapper.selectById(conversationId);
+        if (conv != null) {
+            conv.setSummary(newSummary);
+            conversationMapper.updateById(conv);
+        }
         log.info("Compressed {} older messages into summary ({} chars) for conv {}",
             older.size(), newSummary.length(), conversationId);
 

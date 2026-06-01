@@ -21,11 +21,14 @@ public class MessageCacheService {
 
     private final RedisTemplate<String, Object> redisTemplate;
     private final MessageMapper messageMapper;
+    private final com.agent.conversation.mapper.ConversationMapper conversationMapper;
 
     public MessageCacheService(RedisTemplate<String, Object> redisTemplate,
-                               MessageMapper messageMapper) {
+                               MessageMapper messageMapper,
+                               com.agent.conversation.mapper.ConversationMapper conversationMapper) {
         this.redisTemplate = redisTemplate;
         this.messageMapper = messageMapper;
+        this.conversationMapper = conversationMapper;
     }
 
     public void addMessage(Long convId, String role, String content) {
@@ -110,7 +113,16 @@ public class MessageCacheService {
     public String getSummary(Long convId) {
         String key = MemoryConfig.summaryKey(convId);
         Object val = redisTemplate.opsForValue().get(key);
-        return val != null ? val.toString() : null;
+        if (val != null) return val.toString();
+
+        // Redis miss: fallback to PostgreSQL
+        var conv = conversationMapper.selectById(convId);
+        if (conv != null && conv.getSummary() != null) {
+            redisTemplate.opsForValue().set(key, conv.getSummary(),
+                Duration.ofSeconds(MemoryConfig.REDIS_TTL_SECONDS));
+            return conv.getSummary();
+        }
+        return null;
     }
 
     public void setTopicEmbedding(Long convId, String embeddingJson) {
