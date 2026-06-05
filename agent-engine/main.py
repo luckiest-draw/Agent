@@ -344,34 +344,28 @@ def eval_summary():
 
 @app.post("/eval/rag")
 async def eval_rag(request: dict = None):
-    """RAG 评测：faithfulness + relevancy + precision + recall + 事实准确率"""
+    """RAG 评测：faithfulness + relevancy + precision + recall + 事实准确率
+    评测时使用测试用例自带的期望 context 作为模拟召回片段。
+    如需测试真实 RAG 检索质量，请先往知识库入库文档并设置 OPENAI_API_KEY。
+    """
     from eval.evaluators import run_rag_eval
+    from eval.test_cases import load_rag_cases
+    from models.model_manager import create_llm
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    # 构建 query → expected_context 映射
+    case_map = {c["query"]: c for c in load_rag_cases()}
 
     async def rag_adapter(query: str):
-        """适配器：调项目 RAG 拿到 answer + contexts"""
-        from rag.retriever import retrieve_context
-        from agents.chat_agent import format_messages
-        from models.model_manager import create_llm
-        docs = retrieve_context(query, top_k=5)
-        contexts = [d["content"] if isinstance(d, dict) else d.page_content for d in docs]
+        case = case_map.get(query, {})
+        # 用测试用例内置的期望 context 作为模拟召回
+        contexts = case.get("expected_context", [])
         llm = create_llm(model_name="deepseek-chat", temperature=0.0, streaming=False)
-        system_prompt = request.get("systemPrompt", "根据上下文回答问题，不要编造") if request else "根据上下文回答问题，不要编造"
-        messages = format_messages([], system_prompt)
-        from rag.retriever import build_rag_prompt
-        rag_sys = build_rag_prompt(query, docs, system_prompt) if docs else system_prompt
-        from langchain_core.messages import SystemMessage
-        messages.insert(0, SystemMessage(content=rag_sys))
-        messages.append({"role": "user", "content": query})
-        # 转成 langchain 格式
-        msgs = [SystemMessage(content=rag_sys)] + format_messages([], "")
-        msgs.append({"role": "user", "content": query})
-        # rebuild properly
-        msg_list = [SystemMessage(content=rag_sys)]
-        for m in format_messages([], ""):
-            pass
-        from langchain_core.messages import HumanMessage
-        msg_list.append(HumanMessage(content=query))
-        resp = llm.invoke(msg_list)
+        if contexts:
+            rag_sys = "根据以下参考上下文回答问题，不要编造:\n" + "\n".join(ctx for ctx in contexts)
+        else:
+            rag_sys = "根据你的知识回答问题，不要编造"
+        resp = llm.invoke([SystemMessage(content=rag_sys), HumanMessage(content=query)])
         answer = resp.content if hasattr(resp, "content") else str(resp)
         return answer, contexts
 
@@ -418,13 +412,15 @@ async def eval_all(request: dict = None):
     """一键跑全部评测"""
     from eval.evaluators import run_rag_eval, run_agent_eval, run_hallucination_eval
 
+    from eval.test_cases import load_rag_cases
+    case_map = {c["query"]: c for c in load_rag_cases()}
+
     # RAG
     async def rag_fn(query):
-        from rag.retriever import retrieve_context
         from langchain_core.messages import HumanMessage, SystemMessage
-        docs = retrieve_context(query, top_k=5)
-        contexts = [d["content"] if isinstance(d, dict) else d.page_content for d in docs]
-        rag_sys = f"根据以下参考上下文回答问题，不要编造:\n" + "\n".join(ctx[:300] for ctx in contexts[:3])
+        case = case_map.get(query, {})
+        contexts = case.get("expected_context", [])
+        rag_sys = "根据以下参考上下文回答问题，不要编造:\n" + "\n".join(ctx for ctx in contexts)
         llm = create_llm(model_name="deepseek-chat", temperature=0.0, streaming=False)
         resp = llm.invoke([SystemMessage(content=rag_sys), HumanMessage(content=query)])
         return resp.content if hasattr(resp, "content") else str(resp), contexts

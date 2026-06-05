@@ -3,21 +3,26 @@ import asyncio
 import math
 import logging
 from typing import Optional
-from rag.vector_store import create_embeddings
 from models.model_manager import create_llm
+from config import settings
 
 logger = logging.getLogger("eval")
 
 LLM_JUDGE = None
+_EMBEDDINGS = None
 
 
 def _get_judge():
-    """评测专用 LLM（低温度保证评分一致性）"""
     global LLM_JUDGE
     if LLM_JUDGE is None:
         LLM_JUDGE = create_llm(model_name="deepseek-chat", temperature=0.0,
                                 max_tokens=256, streaming=False)
     return LLM_JUDGE
+
+
+def _get_embeddings():
+    """DeepSeek 不支持 embedding API，统一返回 None 用 LLM judge 替代"""
+    return None
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -33,16 +38,12 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 def evaluate_rag(query: str, answer: str, contexts: list[str]) -> dict:
     """四项 RAG 核心指标"""
-    emb = create_embeddings()
+    emb = _get_embeddings()
 
-    # Faithfulness: LLM 逐句核验是否来自 context
     faithfulness = _faithfulness(answer, contexts)
-    # Answer Relevancy: query 和 answer 的语义相似度
-    answer_relevancy = _answer_relevancy(query, answer, emb)
-    # Context Precision: context 片段中有效的比例
-    context_precision = _context_precision(query, contexts, emb)
-    # Context Recall: 粗略版 — context 是否涵盖了 query 的语义域
-    context_recall = _context_recall(query, answer, contexts, emb)
+    answer_relevancy = _answer_relevancy_llm(query, answer)
+    context_precision = _context_precision_llm(query, contexts)
+    context_recall = _context_recall_llm(answer, contexts)
 
     return {
         "faithfulness": round(faithfulness, 3),
@@ -67,6 +68,21 @@ def _faithfulness(answer: str, contexts: list[str]) -> float:
         "只输出数字，不要其他内容。例如: 0.85"
     )
     resp = judge.invoke(prompt)
+    try:
+        return max(0.0, min(1.0, float(resp.content.strip())))
+    except ValueError:
+        return 0.5
+
+
+def _answer_relevancy_llm(query: str, answer: str) -> float:
+    """LLM 判断回复是否切题（不依赖 embedding）"""
+    if not query or not answer:
+        return 0.0
+    judge = _get_judge()
+    resp = judge.invoke(
+        f"问题: {query[:200]}\n回答: {answer[:500]}\n"
+        "请打分 0.0-1.0 表示回答与问题的相关程度。只输出数字。"
+    )
     try:
         return max(0.0, min(1.0, float(resp.content.strip())))
     except ValueError:
@@ -101,6 +117,38 @@ def _context_precision(query: str, contexts: list[str], emb) -> float:
         scores.append(cosine(qv, cv))
     relevant = sum(1 for s in scores if s >= 0.4)
     return relevant / len(contexts) if contexts else 0.0
+
+
+def _context_precision_llm(query: str, contexts: list[str]) -> float:
+    """LLM 判断 context 有效性"""
+    if not contexts:
+        return 0.0
+    judge = _get_judge()
+    ctx_text = "\n---\n".join(ctx[:200] for ctx in contexts[:4])
+    resp = judge.invoke(
+        f"问题:\n{query[:200]}\n\n参考上下文:\n{ctx_text}\n\n"
+        "这些参考上下文中有几段与问题直接相关？打分 0.0-1.0。只输出数字。"
+    )
+    try:
+        return max(0.0, min(1.0, float(resp.content.strip())))
+    except ValueError:
+        return 0.5
+
+
+def _context_recall_llm(answer: str, contexts: list[str]) -> float:
+    """LLM 判断 context 是否覆盖了 answer 的关键信息"""
+    if not contexts or not answer:
+        return 0.0
+    judge = _get_judge()
+    ctx_text = "\n".join(ctx[:200] for ctx in contexts[:4])
+    resp = judge.invoke(
+        f"AI回复:\n{answer[:400]}\n\n参考上下文:\n{ctx_text}\n\n"
+        "参考上下文是否包含AI回复所需的关键信息？打分 0.0-1.0。只输出数字。"
+    )
+    try:
+        return max(0.0, min(1.0, float(resp.content.strip())))
+    except ValueError:
+        return 0.5
 
 
 def _context_recall(query: str, answer: str, contexts: list[str], emb) -> float:
@@ -201,12 +249,15 @@ def evaluate_hallucination(case: dict, response: str) -> dict:
 async def run_rag_eval(get_answer_fn) -> dict:
     """RAG 批量评测"""
     from .test_cases import load_rag_cases
+    import datetime
     cases = load_rag_cases()
     results = []
-    for case in cases:
+    for i, case in enumerate(cases):
+        logger.info("RAG eval [%d/%d]: %s", i + 1, len(cases), case["query"][:40])
         answer, contexts = await get_answer_fn(case["query"])
         scores = evaluate_rag(case["query"], answer, contexts)
         scores["query"] = case["query"]
+        scores["answer"] = answer[:300]
         scores["min_facts_pass"] = _check_facts(answer, case.get("expected_context", []), case.get("min_facts", 1))
         results.append(scores)
 
@@ -217,7 +268,15 @@ async def run_rag_eval(get_answer_fn) -> dict:
         "context_recall": sum(r["context_recall"] for r in results) / len(results),
         "fact_accuracy": sum(r["min_facts_pass"] for r in results) / len(results),
     }
-    return {"case_results": results, "averages": avg, "total_cases": len(results)}
+    report = {
+        "eval_type": "RAG",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "case_results": results,
+        "averages": avg,
+        "total_cases": len(results),
+    }
+    _save_report("rag_eval", report)
+    return report
 
 
 async def run_agent_eval(get_answer_fn) -> dict:
@@ -263,6 +322,19 @@ async def run_hallucination_eval(get_answer_fn) -> dict:
         "hallucination_rate": round(halluc_rate, 3),
         "total_cases": len(results),
     }
+
+
+def _save_report(name: str, report: dict):
+    """保存评测报告到 eval/reports/ 目录"""
+    import os
+    import json
+    import datetime
+    os.makedirs("eval/reports", exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = f"eval/reports/{name}_{timestamp}.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    logger.info("Report saved: %s", path)
 
 
 def _check_facts(answer: str, expected_keywords: list[str], min_facts: int) -> float:
