@@ -333,6 +333,136 @@ def dispatch_workflow_exec(workflow_def: dict, model: str = None):
     return {"taskId": task.id, "status": "dispatched"}
 
 
+# ==================== Evaluation ====================
+
+@app.get("/eval/summary")
+def eval_summary():
+    """评测用例概览"""
+    from eval.test_cases import summary as tests_summary
+    return tests_summary()
+
+
+@app.post("/eval/rag")
+async def eval_rag(request: dict = None):
+    """RAG 评测：faithfulness + relevancy + precision + recall + 事实准确率"""
+    from eval.evaluators import run_rag_eval
+
+    async def rag_adapter(query: str):
+        """适配器：调项目 RAG 拿到 answer + contexts"""
+        from rag.retriever import retrieve_context
+        from agents.chat_agent import format_messages
+        from models.model_manager import create_llm
+        docs = retrieve_context(query, top_k=5)
+        contexts = [d["content"] if isinstance(d, dict) else d.page_content for d in docs]
+        llm = create_llm(model_name="deepseek-chat", temperature=0.0, streaming=False)
+        system_prompt = request.get("systemPrompt", "根据上下文回答问题，不要编造") if request else "根据上下文回答问题，不要编造"
+        messages = format_messages([], system_prompt)
+        from rag.retriever import build_rag_prompt
+        rag_sys = build_rag_prompt(query, docs, system_prompt) if docs else system_prompt
+        from langchain_core.messages import SystemMessage
+        messages.insert(0, SystemMessage(content=rag_sys))
+        messages.append({"role": "user", "content": query})
+        # 转成 langchain 格式
+        msgs = [SystemMessage(content=rag_sys)] + format_messages([], "")
+        msgs.append({"role": "user", "content": query})
+        # rebuild properly
+        msg_list = [SystemMessage(content=rag_sys)]
+        for m in format_messages([], ""):
+            pass
+        from langchain_core.messages import HumanMessage
+        msg_list.append(HumanMessage(content=query))
+        resp = llm.invoke(msg_list)
+        answer = resp.content if hasattr(resp, "content") else str(resp)
+        return answer, contexts
+
+    result = await run_rag_eval(rag_adapter)
+    return result
+
+
+@app.post("/eval/agent")
+async def eval_agent(request: dict = None):
+    """Agent 评测：工具选择准确率 + 工具利用率 + 安全边界"""
+    from eval.evaluators import run_agent_eval
+
+    async def agent_adapter(query: str):
+        from agents.chat_agent import chat_stream
+        response = ""
+        async for token in chat_stream(query, [], "deepseek-chat", None):
+            response += token
+        # Agent 模式下尝试检测工具调用意图
+        tools_called = _detect_tool_intent(query, response)
+        return response, tools_called
+
+    result = await run_agent_eval(agent_adapter)
+    return result
+
+
+@app.post("/eval/hallucination")
+async def eval_hallucination(request: dict = None):
+    """幻觉率评测：检测模型是否对未知问题编造答案"""
+    from eval.evaluators import run_hallucination_eval
+
+    async def halluc_adapter(query: str):
+        from agents.chat_agent import chat_stream
+        response = ""
+        async for token in chat_stream(query, [], "deepseek-chat", None):
+            response += token
+        return response, []
+
+    result = await run_hallucination_eval(halluc_adapter)
+    return result
+
+
+@app.post("/eval/all")
+async def eval_all(request: dict = None):
+    """一键跑全部评测"""
+    from eval.evaluators import run_rag_eval, run_agent_eval, run_hallucination_eval
+
+    # RAG
+    async def rag_fn(query):
+        from rag.retriever import retrieve_context
+        from langchain_core.messages import HumanMessage, SystemMessage
+        docs = retrieve_context(query, top_k=5)
+        contexts = [d["content"] if isinstance(d, dict) else d.page_content for d in docs]
+        rag_sys = f"根据以下参考上下文回答问题，不要编造:\n" + "\n".join(ctx[:300] for ctx in contexts[:3])
+        llm = create_llm(model_name="deepseek-chat", temperature=0.0, streaming=False)
+        resp = llm.invoke([SystemMessage(content=rag_sys), HumanMessage(content=query)])
+        return resp.content if hasattr(resp, "content") else str(resp), contexts
+
+    async def ag_fn(query):
+        from agents.chat_agent import chat_stream
+        resp = ""
+        async for t in chat_stream(query, [], "deepseek-chat", None):
+            resp += t
+        return resp, _detect_tool_intent(query, resp)
+
+    rag_result = await run_rag_eval(rag_fn)
+    agent_result = await run_agent_eval(ag_fn)
+    halluc_result = await run_hallucination_eval(ag_fn)
+
+    return {
+        "rag": {"averages": rag_result["averages"], "cases": rag_result["total_cases"]},
+        "agent": {"averages": agent_result["averages"], "cases": agent_result["total_cases"]},
+        "hallucination": {"rate": halluc_result["hallucination_rate"],
+                          "cases": halluc_result["total_cases"]},
+    }
+
+
+def _detect_tool_intent(query: str, response: str) -> list[str]:
+    """简易工具意图检测（基于关键词，不实际调工具）"""
+    tools = []
+    qr = (query + " " + response).lower()
+    if any(w in qr for w in ["搜索", "查询", "检索", "搜一下", "查一下", "搜"]):
+        tools.append("web_search")
+    if any(w in qr for w in ["百科", "维基", "wiki"]):
+        tools.append("wikipedia")
+    if any(w in qr for w in ["论文", "文献", "arxiv", "学术"]):
+        tools.append("arxiv")
+    if any(w in qr for w in ["读", "read", "文件", "目录", "list"]):
+        tools.append("read_file")
+    return tools
+
+
 # ==================== Startup ====================
 
 if __name__ == "__main__":
