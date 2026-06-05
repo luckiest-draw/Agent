@@ -69,7 +69,12 @@ Agent/
 │   │   └── circuit_breaker.py      # 三态熔断器 + 优先级降级链 + 健康监控
 │   ├── tools/
 │   │   ├── tool_registry.py        # 工具注册表 (内置 + MCP 动态发现)
-│   │   └── mcp_manager.py          # MCP Server 管理器 (filesystem/GitHub/PostgreSQL)
+│   ├── eval/                      # 评测模块（RAG + Agent + 幻觉率）
+│   │   ├── evaluators.py           # LLM-as-judge 评测指标
+│   │   ├── test_cases.py           # 内置评测用例（23 条）
+│   │   ├── suite_loader.py         # 外部 JSON 套件加载器
+│   │   ├── test_suites/            # JSON 评测套件（不改代码即可新增）
+│   │   └── reports/                # 评测报告存档（带时间戳）
 │   ├── agents/
 │   │   ├── chat_agent.py           # 多轮对话 + 流式输出 (含视觉模型支持)
 │   │   └── skill_agent.py          # Tool Calling Agent + AgentExecutor 流式
@@ -275,6 +280,10 @@ npm run dev
 | GET | `/models/supported` | 支持的模型列表 |
 | GET | `/models/health` | 模型熔断器健康状态 |
 | GET | `/mcp/servers` | MCP 服务器列表和已加载工具 |
+| GET | `/eval/suites` | 评测套件列表 |
+| POST | `/eval/run` | 加载 JSON 套件执行评测 |
+| POST | `/eval/rag` / `/eval/agent` / `/eval/hallucination` | 分项评测 |
+| POST | `/eval/all` | 一键全量评测 |
 | POST | `/workflow/execute` | 同步执行工作流 |
 
 ## 环境变量
@@ -318,3 +327,4 @@ npm run dev
 - **LangGraph StateGraph + Review**: Agent 基于自定义 4 节点 StateGraph（agent→tools→review），ReAct 循环处理工具调用，review 节点审查输出质量，不合格自动打回重试（最多 3 次），最终放行时注入用户侧建议（模拟 Claude Code 回退风格）。MemorySaver checkpoint 持久化每个节点状态，支持断点恢复
 - **MCP 协议**: `MultiServerMCPClient` 管理多个 MCP Server（filesystem + GitHub + PostgreSQL），懒加载 + 10s 连接超时 + 缓存，与内置工具统一路由
 - **熔断降级**: 三态熔断器（Closed→Open→Half-Open），连续 3 次失败自动熔断，冷却后试探恢复。14 个模型按优先级降级链切换，备选模型降能力保可用（temperature↓、max_tokens↓），8s 首包探测超时判定模型不健康
+- **评测体系**: LLM-as-judge 模式，5 项指标（faithfulness/relevancy/precision/recall/幻觉率）。外部 JSON 套件可配置化，投文件即生效无需改代码，报告自动落盘

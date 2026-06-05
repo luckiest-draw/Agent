@@ -295,6 +295,29 @@ SkillRouter.route() (Java)
 - 已配置 3 个 Server（2 启用 + 1 待开启）：filesystem（文件读写）、GitHub（API 操作）、PostgreSQL（数据库查询）
 - 环境变量解析：`${VAR_NAME}` → `os.environ`，支持 API Key 注入
 
+**评测体系（LLM-as-Judge）**：
+
+```
+POST /eval/run {"suite": "platform_knowledge", "model": "deepseek-v4-pro"}
+    │
+    ├── 加载 JSON 套件（eval/test_suites/）→ 投文件即生效，不改代码
+    ├── 逐条跑用例
+    │     ├── RAG 评测: faithfulness / answer_relevancy / context_precision / context_recall
+    │     ├── Agent 评测: tool_selection_accuracy / tool_utilization / safety / refusal
+    │     └── 幻觉评测: 检测模型对未知数据的诚实度
+    │
+    └── 报告落盘 eval/reports/{suite}_{timestamp}.json
+```
+
+5 项评测指标：
+- **faithfulness**：回复是否基于上下文（几个声明是编的）
+- **answer_relevancy**：回复是否切题
+- **context_precision**：召回的片段有几个真正有用
+- **context_recall**：该召回的有没有都召回
+- **hallucination_rate**：面对不知道的问题是否诚实说不知道
+
+> **设计决策**：用 LLM 当裁判（temperature=0 保证一致性）而非 embedding 相似度，因为 DeepSeek 不支持 embedding API。无外部评测框架依赖（ragas/scikit-network 在 Python 3.14 上无法安装），全部指标手写实现。
+
 **文档上传处理流水线**：
 ```
 上传文件 → PENDING → PARSING → CHUNKING → DONE
@@ -610,6 +633,7 @@ while (true) {
 | **Skill = Agent + Tools** | Skill 表 + 关联表打包 AgentConfig + ToolDefs，语义 Router 自动匹配最佳技能 |
 | **Circuit Breaker** | 三态熔断（Closed→Open→Half-Open），连续失败阈值触发 + 冷却恢复 + 试探探活，配合 14 模型优先级降级链 |
 | **MCP 协议** | `MultiServerMCPClient` 统一管理外部 MCP Server，懒加载 + 超时 + 缓存，与内置工具无缝合并 |
+| **LLM-as-Judge** | 评测用 LLM 当裁判（temp=0 保证一致性），5 项指标 + 外部 JSON 套件 + 自动落盘 |
 | **上传-引用模式** | 图片先上传到服务端获取 URL，消息体只传 URL 引用，避免大体积 JSON |
 | **React 不可变状态** | `{ ...obj, field: newValue }` 而非 `obj.field = newValue` |
 | **多模块 Maven** | 9 模块，`agent-gateway` 聚合启动，父 POM 统一版本管理 |
