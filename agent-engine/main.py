@@ -342,6 +342,122 @@ def eval_summary():
     return tests_summary()
 
 
+@app.get("/eval/suites")
+def eval_suites():
+    """列出可用的外部 JSON 测试套件"""
+    from eval.suite_loader import list_suites
+    return {"suites": list_suites()}
+
+
+@app.post("/eval/run")
+async def eval_run(request: dict):
+    """加载外部套件并评测
+    Body: {"suite": "platform_knowledge", "model": "deepseek-v4-pro"}
+    不传 suite 则跑全部套件
+    """
+    from eval.suite_loader import load_suite, load_all_suites, list_suites
+    from eval.evaluators import evaluate_rag
+    import datetime
+    from models.model_manager import create_llm
+    from langchain_core.messages import HumanMessage, SystemMessage
+    import os
+    import json
+
+    suite_name = request.get("suite") if request else None
+    model_name = request.get("model", "deepseek-chat") if request else "deepseek-chat"
+
+    if suite_name:
+        try:
+            suites = [load_suite(suite_name)]
+        except FileNotFoundError as e:
+            return {"error": str(e), "available": [s["file"] for s in list_suites()]}
+    else:
+        suites = load_all_suites()
+
+    if not suites:
+        return {"error": "No suites found",
+                "directory": os.path.abspath("eval/test_suites")}
+
+    all_reports = []
+    llm = create_llm(model_name=model_name, temperature=0.0, streaming=False)
+
+    for suite in suites:
+        stype = suite.get("type", "rag")
+        cases = suite.get("cases", [])
+        results = []
+
+        for i, case in enumerate(cases):
+            query = case["query"]
+            logger.info("[%s] %d/%d: %s", suite.get("name", ""), i + 1, len(cases), query[:50])
+
+            # 构建上下文
+            contexts = case.get("expected_context", [])
+            if contexts:
+                sys_prompt = "根据以下参考上下文回答问题，不要编造:\n" + "\n".join(contexts)
+            else:
+                sys_prompt = "根据你的知识回答问题，不要编造"
+
+            resp = llm.invoke([SystemMessage(content=sys_prompt), HumanMessage(content=query)])
+            answer = resp.content if hasattr(resp, "content") else str(resp)
+
+            if stype == "rag":
+                scores = evaluate_rag(query, answer, contexts)
+            elif stype == "agent":
+                from eval.evaluators import evaluate_agent
+                tools_called = _detect_tool_intent(query, answer)
+                scores = evaluate_agent(case, answer, tools_called)
+            elif stype == "hallucination":
+                from eval.evaluators import evaluate_hallucination
+                scores = evaluate_hallucination(case, answer)
+            else:
+                scores = {}
+
+            scores["query"] = query
+            scores["answer"] = answer[:300]
+            results.append(scores)
+
+        # 统计
+        avg = {}
+        if stype == "rag":
+            avg = {
+                "faithfulness": sum(r.get("faithfulness", 0) for r in results) / len(results),
+                "answer_relevancy": sum(r.get("answer_relevancy", 0) for r in results) / len(results),
+                "context_precision": sum(r.get("context_precision", 0) for r in results) / len(results) if results[0].get("context_precision") is not None else None,
+                "context_recall": sum(r.get("context_recall", 0) for r in results) / len(results) if results[0].get("context_recall") is not None else None,
+            }
+
+        report = {
+            "suite": suite.get("name"),
+            "type": stype,
+            "model": model_name,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "case_results": results,
+            "averages": avg,
+            "total_cases": len(results),
+        }
+
+        # 落盘
+        os.makedirs("eval/reports", exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = f"eval/reports/{suite.get('name', 'suite')}_{ts}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+        logger.info("Report saved: %s", path)
+
+        all_reports.append({
+            "suite": suite.get("name"),
+            "report_file": path,
+            "averages": avg,
+            "cases": len(results),
+        })
+
+    return {
+        "model": model_name,
+        "reports": all_reports,
+        "total_suites": len(all_reports),
+    }
+
+
 @app.post("/eval/rag")
 async def eval_rag(request: dict = None):
     """RAG 评测：faithfulness + relevancy + precision + recall + 事实准确率

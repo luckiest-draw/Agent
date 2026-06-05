@@ -1,0 +1,104 @@
+{
+  "eval_type": "RAG",
+  "timestamp": "2026-06-05T23:06:14.633929",
+  "case_results": [
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.8,
+      "context_recall": 0.0,
+      "query": "平台的默认登录账号和密码是什么",
+      "answer": "根据提供的参考上下文，平台的默认登录账号是“admin”，密码是“admin123”。",
+      "min_facts_pass": 1.0
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.9,
+      "context_recall": 1.0,
+      "query": "这个项目用的是什么数据库",
+      "answer": "根据提供的参考上下文，该项目使用的是 **PostgreSQL** 数据库，并使用了 **pgvector** 扩展。",
+      "min_facts_pass": 1.0
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.8,
+      "context_recall": 0.0,
+      "query": "聊天会话的记忆是多轮窗口",
+      "answer": "根据参考上下文，聊天会话的记忆是 **20轮** 的滑动窗口。",
+      "min_facts_pass": 1.0
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9,
+      "context_precision": 0.8,
+      "context_recall": 0.9,
+      "query": "上传的图片会保存多久",
+      "answer": "上传的图片会在24小时后自动清理，具体清理时间为凌晨3点。",
+      "min_facts_pass": 1.0
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 0.8,
+      "query": "项目支持哪些大模型",
+      "answer": "根据参考上下文，项目支持的大模型包括：DeepSeek、GPT-4o、GLM、Qwen、Gemini。",
+      "min_facts_pass": 1.0
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.8,
+      "context_recall": 0.9,
+      "query": "语音输入功能是怎么实现的",
+      "answer": "根据提供的参考上下文，语音输入功能的实现主要涉及以下技术组件：\n\n1. **Whisper**：这是一个语音识别模型，用于将音频转换为文本。它负责处理语音信号并生成对应的文字内容。\n\n2. **STT（Speech-to-Text，语音转文字）**：这是语音输入的核心技术，将用户的语音实时或离线转换为可读的文本。\n\n3. **MediaRecorder**：这是一个浏览器或设备上的API，用于录制用户的语音输入。它捕获音频数据，并将其传递给后续处理模块。\n\n4. **转写**：指将录制的语音通过STT模型（如Whisper）转换为文本的过程。\n\n**实现流程**：\n- 用户通过MediaRec",
+      "min_facts_pass": 1.0
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "query": "项目中 PII 脱敏会处理哪些信息",
+      "answer": "根据参考上下文，项目中PII脱敏会处理的信息包括：手机号、身份证、邮箱、银行卡。",
+      "min_facts_pass": 1.0
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9,
+      "context_precision": 0.0,
+      "context_recall": 1.0,
+      "query": "话题检测是怎么判断用户切换话题的",
+      "answer": "话题检测通常通过计算用户当前输入与之前对话内容的**余弦相似度**来判断是否切换话题。具体来说，系统会将用户的每一条输入转化为**embedding**（即向量表示），然后计算当前输入与最近一段对话历史（如最后几轮）的embedding之间的余弦相似度。如果这个相似度低于某个阈值（例如**0.6**），就认为用户可能切换了话题；反之，如果相似度较高，则认为是延续当前话题。",
+      "min_facts_pass": 1.0
+    },
+    {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0,
+      "query": "Redis 数据过期后历史记录还能拿到吗",
+      "answer": "根据提供的参考上下文，无法直接回答“Redis 数据过期后历史记录还能拿到吗”这个问题。因为参考上下文中只提到了“PostgreSQL”、“回源”和“重建缓存”，没有涉及 Redis 的数据过期机制或历史记录保留的相关信息。\n\n不过，基于通用知识可以补充说明：在 Redis 中，数据过期后会被自动删除，通常无法再直接获取历史记录，除非有额外的持久化或备份机制（如 AOF 日志、RDB 快照或外部存储）。但请以您实际使用的 Redis 配置和业务逻辑为准。",
+      "min_facts_pass": 1.0
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.0,
+      "context_recall": 0.5,
+      "query": "项目的图片上传支持哪些格式",
+      "answer": "根据参考上下文，项目的图片上传支持的格式包括：JPEG、PNG、GIF、WebP、BMP。",
+      "min_facts_pass": 1.0
+    }
+  ],
+  "averages": {
+    "faithfulness": 0.9,
+    "answer_relevancy": 0.8699999999999999,
+    "context_precision": 0.6100000000000001,
+    "context_recall": 0.61,
+    "fact_accuracy": 1.0
+  },
+  "total_cases": 10
+}

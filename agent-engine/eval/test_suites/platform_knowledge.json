@@ -1,0 +1,67 @@
+{
+  "name": "平台知识库问答",
+  "description": "项目文档、配置、架构相关的基础问答",
+  "type": "rag",
+  "cases": [
+    {
+      "query": "平台的默认登录账号和密码是什么",
+      "expected_context": ["admin", "admin123", "登录"],
+      "expected_answer": "默认账号是 admin，密码是 admin123",
+      "min_facts": 2
+    },
+    {
+      "query": "这个项目用的是什么数据库",
+      "expected_context": ["PostgreSQL", "pgvector", "向量"],
+      "expected_answer": "使用 PostgreSQL 15 配合 pgvector 扩展",
+      "min_facts": 2
+    },
+    {
+      "query": "聊天会话的记忆是多轮窗口",
+      "expected_context": ["20轮", "滑动窗口", "Redis"],
+      "expected_answer": "20 轮滑动窗口，Redis 缓存 + PostgreSQL 持久化",
+      "min_facts": 2
+    },
+    {
+      "query": "上传的图片会保存多久",
+      "expected_context": ["24小时", "自动清理", "凌晨3点"],
+      "expected_answer": "图片保存 24 小时，每天凌晨 3 点自动清理",
+      "min_facts": 2
+    },
+    {
+      "query": "项目支持哪些大模型",
+      "expected_context": ["DeepSeek", "GPT-4o", "GLM", "Qwen", "Gemini"],
+      "expected_answer": "支持 DeepSeek、GPT-4o、GLM-4、Qwen、Gemini 等模型",
+      "min_facts": 3
+    },
+    {
+      "query": "语音输入功能是怎么实现的",
+      "expected_context": ["Whisper", "STT", "MediaRecorder", "转写"],
+      "expected_answer": "前端用 MediaRecorder 录音，后端调 OpenAI Whisper API 转写为文字",
+      "min_facts": 2
+    },
+    {
+      "query": "项目中 PII 脱敏会处理哪些信息",
+      "expected_context": ["手机号", "身份证", "邮箱", "银行卡"],
+      "expected_answer": "脱敏会处理手机号、身份证号、邮箱和银行卡号",
+      "min_facts": 3
+    },
+    {
+      "query": "话题检测是怎么判断用户切换话题的",
+      "expected_context": ["关键词", "余弦相似度", "embedding", "0.6"],
+      "expected_answer": "通过关键词交集粗筛 + embedding 余弦相似度精确判断，阈值为 0.6",
+      "min_facts": 2
+    },
+    {
+      "query": "Redis 数据过期后历史记录还能拿到吗",
+      "expected_context": ["PostgreSQL", "回源", "重建缓存"],
+      "expected_answer": "可以，Redis 过期后会自动从 PostgreSQL 加载并重建缓存",
+      "min_facts": 2
+    },
+    {
+      "query": "项目的图片上传支持哪些格式",
+      "expected_context": ["JPEG", "PNG", "GIF", "WebP", "BMP"],
+      "expected_answer": "支持 JPEG、PNG、GIF、WebP、BMP 格式，最大 10MB",
+      "min_facts": 3
+    }
+  ]
+}
