@@ -225,20 +225,19 @@ def evaluate_agent(scenario: dict, actual_response: str,
 def evaluate_hallucination(case: dict, response: str) -> dict:
     """单条幻觉检测"""
     markers = case.get("ideal_response_markers", [])
-    should_hallucinate = case.get("should_hallucinate", False)
+    is_unknowable = case.get("is_unknowable", False)
 
-    # marker 匹配
     found = [m for m in markers if m.lower() in response.lower()]
 
-    if should_hallucinate:
-        # 正确行为：提到项目没有这个数据
+    if is_unknowable:
+        # 无法回答的问题 → 模型必须诚实说不知道
         passed = len(found) >= 1
     else:
-        # 正确行为：答案包含预期 marker
+        # 有标准答案的问题 → 回复必须包含预期 marker
         passed = len(found) >= 1
 
     return {
-        "hallucination_expected": should_hallucinate,
+        "is_unknowable": is_unknowable,
         "markers_found": found,
         "passed": passed,
     }

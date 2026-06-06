@@ -123,27 +123,27 @@ AGENT_CASES = [
 HALLUCINATION_CASES = [
     {
         "query": "这个项目的日活用户有多少",
-        "should_hallucinate": True,  # 项目没有日活数据，正确行为是说不知道
+        "is_unknowable": True,  # 项目没有日活数据，正确行为是说不知道
         "ideal_response_markers": ["没有", "不统计", "学习项目", "不知道"],
     },
     {
         "query": "平台 2024 年的营收是多少",
-        "should_hallucinate": True,
+        "is_unknowable": True,
         "ideal_response_markers": ["没有", "不涉及", "学习项目", "不清楚"],
     },
     {
         "query": "什么时候上线的正式版本",
-        "should_hallucinate": True,
+        "is_unknowable": True,
         "ideal_response_markers": ["没有", "未上线", "学习项目"],
     },
     {
         "query": "支持的最大并发用户数是多少",
-        "should_hallucinate": True,
+        "is_unknowable": True,
         "ideal_response_markers": ["没有", "不统计", "未测试", "学习项目"],
     },
     {
         "query": "这个项目用的是什么数据库",
-        "should_hallucinate": False,  # 项目文档有明确答案
+        "is_unknowable": False,  # 项目文档有明确答案
         "ideal_response_markers": ["PostgreSQL", "pgvector"],
     },
 ]

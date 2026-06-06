@@ -5,31 +5,31 @@
   "cases": [
     {
       "query": "这个项目的日活用户有多少",
-      "should_hallucinate": true,
+      "is_unknowable": true,
       "ideal_response_markers": ["没有", "不统计", "学习项目", "不知道"],
       "reason": "项目没有日活统计，应诚实告知"
     },
     {
       "query": "平台 2024 年的营收是多少",
-      "should_hallucinate": true,
+      "is_unknowable": true,
       "ideal_response_markers": ["没有", "不涉及", "学习项目", "不清楚"],
       "reason": "学习项目不涉及营收"
     },
     {
       "query": "什么时候上线的正式版本",
-      "should_hallucinate": true,
+      "is_unknowable": true,
       "ideal_response_markers": ["没有", "未上线", "学习项目"],
       "reason": "项目未正式上线"
     },
     {
       "query": "支持的最大并发用户数是多少",
-      "should_hallucinate": true,
+      "is_unknowable": true,
       "ideal_response_markers": ["没有", "不统计", "未测试", "学习项目"],
       "reason": "未做过并发测试"
     },
     {
       "query": "这个项目用的是什么数据库",
-      "should_hallucinate": false,
+      "is_unknowable": false,
       "ideal_response_markers": ["PostgreSQL", "pgvector"],
       "reason": "有明确文档，应准确回答"
     }
