@@ -1,6 +1,7 @@
-# Skill Agent: ReAct + Review Loop + 熔断降级 + 首包探测
+# Skill Agent: 意图提取 + ReAct + Review Loop + 熔断降级
 from typing import AsyncIterator, List, Dict, Optional, Annotated, TypedDict
 import asyncio
+from pydantic import BaseModel, Field
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -15,6 +16,30 @@ import json
 logger = logging.getLogger("skill_agent")
 _checkpointer = MemorySaver()
 FIRST_TOKEN_TIMEOUT = 8.0
+
+
+class IntentSlots(BaseModel):
+    """从用户消息中提取的结构化意图槽位"""
+    action: str = Field(
+        default="",
+        description="用户想执行的操作：query(查询)/create(创建)/update(更新)/delete(删除)/search(搜索)/explain(解释)/unknown(不确定)"
+    )
+    target: str = Field(
+        default="",
+        description="操作对象：order(订单)/user(用户)/document(文档)/knowledge(知识)/code(代码)/file(文件)/unknown"
+    )
+    keywords: list[str] = Field(
+        default_factory=list,
+        description="关键信息词列表，如日期、地点、人名、编号等"
+    )
+    constraints: str = Field(
+        default="",
+        description="约束条件，如时间范围、地域限制、状态过滤等"
+    )
+    is_knowledge_question: bool = Field(
+        default=False,
+        description="是否为知识型问题（问概念、原理、定义类，不需要外部操作）"
+    )
 
 
 class AgentState(TypedDict):
@@ -39,8 +64,35 @@ def _build_messages(query: str, history: List[Dict], system_prompt: str = None) 
 
 
 def _build_graph(llm, review_llm, tool_instances):
-    """构建 agent→tools→review 图"""
+    """构建 intent_extract → agent → tools → review 图"""
     llm_with_tools = llm.bind_tools(tool_instances)
+    intent_extractor = llm.with_structured_output(IntentSlots)
+
+    def extract_intent_node(state: AgentState):
+        """从用户最后一条消息提取结构化意图，注入上下文"""
+        messages = state["messages"]
+        user_msgs = [m for m in messages if isinstance(m, HumanMessage)]
+        if not user_msgs:
+            return {}
+        last_user = user_msgs[-1].content
+
+        try:
+            intent: IntentSlots = intent_extractor.invoke(
+                f"提取意图：{last_user[:500]}")
+        except Exception:
+            intent = IntentSlots()
+
+        # 拼成结构化提示注入到消息流
+        intent_text = f"[意图分析] 动作={intent.action}, 对象={intent.target}"
+        if intent.keywords:
+            intent_text += f", 关键词={intent.keywords}"
+        if intent.constraints:
+            intent_text += f", 约束={intent.constraints}"
+        if intent.is_knowledge_question:
+            intent_text += ", 类型=知识问答"
+
+        logger.info("Intent extracted: %s", intent_text)
+        return {"messages": [SystemMessage(content=intent_text)]}
 
     def agent_node(state: AgentState):
         response = llm_with_tools.invoke(state["messages"])
@@ -148,10 +200,12 @@ AI 回复：
         return END
 
     builder = StateGraph(AgentState)
+    builder.add_node("intent", extract_intent_node)
     builder.add_node("agent", agent_node)
     builder.add_node("tools", ToolNode(tool_instances))
     builder.add_node("review", review_node)
-    builder.add_edge(START, "agent")
+    builder.add_edge(START, "intent")
+    builder.add_edge("intent", "agent")
     builder.add_conditional_edges("agent", tools_condition, {"tools": "tools", END: "review"})
     builder.add_edge("tools", "agent")
     builder.add_conditional_edges("review", after_review, {"agent": "agent", END: END})
