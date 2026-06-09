@@ -47,8 +47,13 @@ public class SkillService {
     }
 
     public List<Skill> listSkills(Long tenantId) {
-        return skillMapper.selectList(
-            new LambdaQueryWrapper<Skill>().eq(Skill::getTenantId, tenantId));
+        var qw = new LambdaQueryWrapper<Skill>();
+        if (tenantId != null) {
+            qw.eq(Skill::getTenantId, tenantId);
+        } else {
+            qw.isNull(Skill::getTenantId).or().eq(Skill::getTenantId, 1L);
+        }
+        return skillMapper.selectList(qw);
     }
 
     public List<Map<String, String>> listSkillsForRouting(Long tenantId) {
