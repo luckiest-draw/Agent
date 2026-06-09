@@ -91,23 +91,14 @@ export default function Chat() {
                 setConversationId(data.conversationId)
               }
               if (data.done && data.conversationId) break
-              if (data.event === 'tool_call') {
+              if (data.event === 'tool_call' || data.event === 'tool_result') {
+                // 工具调用仅更新状态标记，不写入消息内容
                 setMessages((prev) => {
                   const updated = [...prev]
                   const last = updated[updated.length - 1]
                   if (last.role === 'assistant') {
-                    const toolNote = `\n\n🔧 正在使用 **${data.tool}** 查询...\n`
-                    updated[updated.length - 1] = { ...last, content: last.content + toolNote }
-                  }
-                  return updated
-                })
-              } else if (data.event === 'tool_result') {
-                setMessages((prev) => {
-                  const updated = [...prev]
-                  const last = updated[updated.length - 1]
-                  if (last.role === 'assistant') {
-                    const resultNote = `\n✅ **${data.tool}** 返回结果\n\n`
-                    updated[updated.length - 1] = { ...last, content: last.content + resultNote }
+                    const count = (last as any).toolCalls || 0
+                    updated[updated.length - 1] = { ...last, toolCalls: count + 1 } as any
                   }
                   return updated
                 })
@@ -170,7 +161,17 @@ export default function Chat() {
                   onClick={() => setShowImageViewer(msg.imageUrl!)}
                 />
               )}
+              {(msg as any).toolCalls > 0 && !msg.content && (
+                <p className="text-muted-foreground animate-pulse text-xs">
+                  🔍 查询中...
+                </p>
+              )}
               {msg.content && <p className="whitespace-pre-wrap">{msg.content}</p>}
+              {(msg as any).toolCalls > 0 && msg.content && (
+                <p className="text-muted-foreground text-xs mt-1 opacity-50">
+                  已搜索 {(msg as any).toolCalls} 次
+                </p>
+              )}
             </div>
             {msg.role === 'user' && (
               <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center shrink-0">
