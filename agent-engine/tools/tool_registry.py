@@ -47,20 +47,25 @@ async def _ensure_mcp_tools():
 
 
 async def get_tools(tool_names: list[str]) -> list:
-    """根据工具名列表返回 BaseTool 实例（内置 + MCP）"""
+    """根据工具名列表返回 BaseTool 实例（内置 + MCP），自动去重"""
     tools = []
+    seen_names = set()
     mcp_tools = await _ensure_mcp_tools()
     mcp_by_name = {t.name: t for t in mcp_tools}
 
     for name in tool_names:
         name = name.strip().lower()
+        if name in seen_names:
+            continue
         if name in TOOL_DEFS:
             tool = _create_builtin_tool(name)
             if tool:
                 tools.append(tool)
+                seen_names.add(name)
             continue
         if name in mcp_by_name:
             tools.append(mcp_by_name[name])
+            seen_names.add(name)
             continue
         logger.warning("Unknown tool: %s, skipping", name)
 

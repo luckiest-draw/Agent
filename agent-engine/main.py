@@ -253,11 +253,18 @@ class SingleEmbedRequest(BaseModel):
 
 @app.post("/rag/embed-single")
 def embed_single(request: SingleEmbedRequest):
-    """获取单文本的 embedding 向量，不存入 pgvector（话题检测用）"""
+    """获取单文本的 embedding 向量，不存入 pgvector（话题检测用）
+    如果 embedding API 不可用，返回零向量作为降级方案
+    """
     from rag.vector_store import create_embeddings
-    emb = create_embeddings()
-    vector = emb.embed_query(request.text)
-    return {"embedding": vector, "dimensions": len(vector)}
+    try:
+        emb = create_embeddings()
+        vector = emb.embed_query(request.text)
+        return {"embedding": vector, "dimensions": len(vector)}
+    except Exception as e:
+        logger.warning("embed-single failed (%s), returning fallback vector", e)
+        # 降级：返回 1536 维零向量，让 TopicDetector 走关键词判断
+        return {"embedding": [0.0] * 1536, "dimensions": 1536, "fallback": True}
 
 
 class SummarizeRequest(BaseModel):

@@ -288,7 +288,10 @@ async def skill_chat_stream(
     today = datetime.now().strftime("%Y年%m月%d日 %A")
     sp = f"今天是 {today}。\n{sp}"
     initial_messages = _build_messages(query, history, sp)
-    config = {"configurable": {"thread_id": str(conversation_id)}}
+    # 每次请求用唯一 thread_id，避免前次失败状态的工具名冲突
+    import time
+    config = {"configurable": {"thread_id": f"{conversation_id}-{int(time.time())}"},
+              "recursion_limit": 50}
 
     last_error = None
     for level, candidate in enumerate(candidates):
