@@ -47,6 +47,7 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     review_count: int
     review_history: str
+    tool_iterations: int  # 本轮工具调用次数
 
 
 def _build_messages(query: str, history: List[Dict], system_prompt: str = None) -> list:
@@ -207,8 +208,22 @@ AI 回复：
     builder.add_node("review", review_node)
     builder.add_edge(START, "intent")
     builder.add_edge("intent", "agent")
-    builder.add_conditional_edges("agent", tools_condition, {"tools": "tools", END: "review"})
-    builder.add_edge("tools", "agent")
+    def limited_tools_condition(state: AgentState):
+        """控制工具调用次数上限：最多3轮，防止搜索链过长"""
+        iters = state.get("tool_iterations", 0)
+        if iters >= 3:
+            return END
+        result = tools_condition(state)
+        if result == "tools":
+            return "tools"
+        return END
+
+    builder.add_conditional_edges("agent", limited_tools_condition,
+                                   {"tools": "tools", END: "review"})
+    # 工具调用后计数 +1，限制最多 3 轮
+    builder.add_node("counter", lambda s: {"tool_iterations": s.get("tool_iterations", 0) + 1})
+    builder.add_edge("tools", "counter")
+    builder.add_edge("counter", "agent")
     builder.add_conditional_edges("review", after_review, {"agent": "agent", END: END})
     return builder.compile(checkpointer=_checkpointer)
 
@@ -217,7 +232,8 @@ async def _stream_graph_events(graph, initial_messages, config) -> AsyncIterator
     """流式输出图事件，带首包探测"""
     accumulated = ""
     event_iter = graph.astream_events(
-        {"messages": initial_messages, "review_count": 0, "review_history": ""},
+        {"messages": initial_messages, "review_count": 0, "review_history": "",
+         "tool_iterations": 0},
         config=config, version="v2",
     )
 
