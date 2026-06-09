@@ -143,36 +143,64 @@ async def skill_chat_endpoint(request: ChatRequest):
 
 @app.post("/skills/route")
 def route_skill(request: dict):
-    """根据用户消息路由到最匹配的 Skill（基于 embedding 相似度）"""
-    from rag.vector_store import create_embeddings
+    """根据用户消息路由到最匹配的 Skill（LLM 分类 + embedding 降级）"""
     query = request.get("query", "")
     skills = request.get("skills", [])  # [{"name": "...", "description": "..."}, ...]
 
     if not skills or not query:
         return {"skill": None, "score": 0.0, "reason": "no skills or empty query"}
 
-    emb = create_embeddings()
-    query_vec = emb.embed_query(query)
-    scores = []
-    for s in skills:
-        desc = s.get("description", "")
-        if not desc:
-            scores.append((s["name"], 0.0))
-            continue
-        skill_vec = emb.embed_query(desc)
-        dot = sum(a * b for a, b in zip(query_vec, skill_vec))
-        norm_a = sum(a * a for a in query_vec) ** 0.5
-        norm_b = sum(b * b for b in skill_vec) ** 0.5
-        sim = dot / (norm_a * norm_b) if norm_a > 0 and norm_b > 0 else 0.0
-        scores.append((s["name"], sim))
+    # 优先用 LLM 做路由（不需要 OpenAI key）
+    try:
+        from models.model_manager import create_llm
+        skill_lines = "\n".join(
+            f"- {s['name']}: {s.get('description', '')[:100]}"
+            for s in skills
+        )
+        llm = create_llm(model_name="deepseek-chat", temperature=0.0, max_tokens=64, streaming=False)
+        resp = llm.invoke(
+            f"用户说：{query[:200]}\n\n"
+            f"以下是可以用的技能：\n{skill_lines}\n\n"
+            f"请选择最适合处理这个请求的技能。只输出技能名称，不要其他内容。"
+            f"如果都不合适，输出 none。"
+        )
+        skill_name = resp.content.strip() if hasattr(resp, "content") else str(resp).strip()
+        if skill_name and skill_name.lower() != "none":
+            for s in skills:
+                if s["name"] == skill_name:
+                    return {"skill": skill_name, "score": 1.0, "matched": True,
+                            "method": "llm"}
+    except Exception as e:
+        logger.warning("LLM routing failed, trying embedding: %s", e)
 
-    scores.sort(key=lambda x: x[1], reverse=True)
-    best = scores[0]
-    threshold = request.get("threshold", 0.7)
-    if best[1] >= threshold:
-        return {"skill": best[0], "score": round(best[1], 4), "matched": True}
-    return {"skill": None, "score": round(best[1], 4), "matched": False,
-            "reason": f"best match '{best[0]}' below threshold {threshold}"}
+    # 降级：embedding 相似度匹配（需要 OpenAI key 且 DeepSeek 不支持）
+    try:
+        from rag.vector_store import create_embeddings
+        emb = create_embeddings()
+        query_vec = emb.embed_query(query)
+        scores = []
+        for s in skills:
+            desc = s.get("description", "")
+            if not desc:
+                scores.append((s["name"], 0.0))
+                continue
+            skill_vec = emb.embed_query(desc)
+            dot = sum(a * b for a, b in zip(query_vec, skill_vec))
+            norm_a = sum(a * a for a in query_vec) ** 0.5
+            norm_b = sum(b * b for b in skill_vec) ** 0.5
+            sim = dot / (norm_a * norm_b) if norm_a > 0 and norm_b > 0 else 0.0
+            scores.append((s["name"], sim))
+        scores.sort(key=lambda x: x[1], reverse=True)
+        best = scores[0]
+        threshold = request.get("threshold", 0.7)
+        if best[1] >= threshold:
+            return {"skill": best[0], "score": round(best[1], 4), "matched": True,
+                    "method": "embedding"}
+    except Exception as e2:
+        logger.warning("Embedding routing also failed: %s", e2)
+
+    return {"skill": None, "score": 0.0, "matched": False,
+            "reason": "routing unavailable"}
 
 
 @app.get("/skills/tools")
