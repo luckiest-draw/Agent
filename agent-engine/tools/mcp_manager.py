@@ -15,7 +15,7 @@ MCP_SERVER_CONFIGS = {
         "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
         "transport": "stdio",
         "description": "读写本地文件系统",
-        "enabled": False,  # Python 3.14 兼容性问题，暂时关闭
+        "enabled": True
     },
     # GitHub：PR/Issue/代码操作，需设置 GITHUB_PERSONAL_ACCESS_TOKEN 环境变量
     "github": {
@@ -26,7 +26,7 @@ MCP_SERVER_CONFIGS = {
             "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}",
         },
         "description": "GitHub API：搜索代码、管理PR/Issue、查看仓库",
-        "enabled": False,  # Python 3.14 兼容性问题，暂时关闭
+        "enabled": True
     },
     # PostgreSQL：执行数据库查询
     "postgres": {
