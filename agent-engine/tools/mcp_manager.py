@@ -9,13 +9,13 @@ logger = logging.getLogger("mcp_manager")
 # transport="stdio": 本地子进程方式启动 MCP Server
 # transport="sse": 远程 HTTP SSE 方式连接
 MCP_SERVER_CONFIGS = {
-    # 文件系统：读写本地文件，已启用
+    # 文件系统：读写本地文件
     "filesystem": {
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
         "transport": "stdio",
         "description": "读写本地文件系统",
-        "enabled": True,
+        "enabled": False,  # Python 3.14 兼容性问题，暂时关闭
     },
     # GitHub：PR/Issue/代码操作，需设置 GITHUB_PERSONAL_ACCESS_TOKEN 环境变量
     "github": {
@@ -26,7 +26,7 @@ MCP_SERVER_CONFIGS = {
             "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}",
         },
         "description": "GitHub API：搜索代码、管理PR/Issue、查看仓库",
-        "enabled": True,
+        "enabled": False,  # Python 3.14 兼容性问题，暂时关闭
     },
     # PostgreSQL：执行数据库查询
     "postgres": {
@@ -130,6 +130,9 @@ async def load_mcp_tools() -> list:
         for t in tools:
             logger.info("  MCP tool: %s (%s)", t.name, t.description[:80] if t.description else "no desc")
         return list(_mcp_tools_cache)
+    except ImportError as e:
+        logger.warning("MCP adapter unavailable: %s", e)
+        return []
     except asyncio.TimeoutError:
         logger.warning("MCP server connection timed out (10s), tools unavailable")
         return []
