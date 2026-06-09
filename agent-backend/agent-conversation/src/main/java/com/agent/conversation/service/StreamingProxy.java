@@ -105,6 +105,10 @@ public class StreamingProxy {
                     }
                 }
                 reader.close();
+                // 返回会话 ID 给前端，后续消息复用此 ID 走 /{id}/stream
+                emitter.send(SseEmitter.event().data(
+                    mapper.writeValueAsString(
+                        Map.of("conversationId", conversationId, "done", true))));
                 emitter.complete();
                 if (callback != null) {
                     callback.onComplete(fullResponse.toString());
@@ -212,6 +216,9 @@ public class StreamingProxy {
                     }
                 }
                 reader.close();
+                emitter.send(SseEmitter.event().data(
+                    mapper.writeValueAsString(
+                        Map.of("conversationId", conversationId, "done", true))));
                 emitter.complete();
                 if (callback != null) callback.onComplete(fullResponse.toString());
                 log.info("SkillStream completed for conv {}, response {} chars",

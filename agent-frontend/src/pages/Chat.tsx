@@ -14,6 +14,7 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const [conversationId, setConversationId] = useState<number | null>(null)
   const [images, setImages] = useState<ImageInfo[]>([])
   const [showImageViewer, setShowImageViewer] = useState<string | null>(null)
   const selectedModel = useAppStore((s) => s.selectedModel)
@@ -44,15 +45,27 @@ export default function Chat() {
 
     try {
       const token = useAppStore.getState().token
-      const res = await fetch('/api/conversations/stream', {
+      // 已有会话则复用 /{id}/stream，否则新建 /stream
+      const currentConvId = conversationId
+      const url = currentConvId
+        ? `/api/conversations/${currentConvId}/stream`
+        : '/api/conversations/stream'
+      const body = currentConvId
+        ? JSON.stringify({
+            message: text || '请描述这张图片',
+            modelName: selectedModel,
+            imageUrl: primaryImageUrl || undefined,
+          })
+        : JSON.stringify({
+            query: text || '请描述这张图片',
+            history: messages,
+            model: selectedModel,
+            imageUrl: primaryImageUrl || undefined,
+          })
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          query: text || '请描述这张图片',
-          history: messages,
-          model: selectedModel,
-          imageUrl: primaryImageUrl || undefined,
-        }),
+        body,
       })
       const reader = res.body?.getReader()
       if (!reader) return
@@ -73,7 +86,11 @@ export default function Chat() {
               const jsonStr = line.slice(5).trim();
               if (!jsonStr) continue;
               const data = JSON.parse(jsonStr);
-              if (data.done) break
+              // 收到会话 ID 后保存，后续消息复用
+              if (data.conversationId) {
+                setConversationId(data.conversationId)
+              }
+              if (data.done && data.conversationId) break
               if (data.event === 'tool_call') {
                 setMessages((prev) => {
                   const updated = [...prev]
