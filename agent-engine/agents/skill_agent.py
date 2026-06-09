@@ -1,6 +1,7 @@
 # Skill Agent: 意图提取 + ReAct + Review Loop + 熔断降级
 from typing import AsyncIterator, List, Dict, Optional, Annotated, TypedDict
 import asyncio
+from datetime import datetime
 from pydantic import BaseModel, Field
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.graph import StateGraph, START, END
@@ -284,6 +285,8 @@ async def skill_chat_stream(
         "回复时要引用工具返回的信息来源。"
     )
     sp = system_prompt or default_system
+    today = datetime.now().strftime("%Y年%m月%d日 %A")
+    sp = f"今天是 {today}。\n{sp}"
     initial_messages = _build_messages(query, history, sp)
     config = {"configurable": {"thread_id": str(conversation_id)}}
 

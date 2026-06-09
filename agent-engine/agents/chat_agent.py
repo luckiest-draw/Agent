@@ -2,6 +2,7 @@
 from typing import AsyncIterator, List, Dict, Optional
 import asyncio
 import logging
+from datetime import datetime
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from models.model_manager import create_llm, supports_vision
 from models.multimodal import build_multimodal_content
@@ -72,7 +73,13 @@ async def chat_stream(
         try:
             llm = create_llm(model_name=candidate, temperature=effective_temp,
                              max_tokens=degrade["max_tokens"], streaming=True)
+            today = datetime.now().strftime("%Y年%m月%d日 %A")
+            date_note = f"今天是 {today}。"
             messages = format_messages(history, system_prompt)
+            if not system_prompt:
+                messages.insert(0, SystemMessage(content=date_note))
+            else:
+                messages[0] = SystemMessage(content=f"{date_note}\n{messages[0].content}")
             if image_url:
                 messages.append(HumanMessage(content=build_multimodal_content(query, image_url)))
             else:
@@ -124,8 +131,10 @@ async def rag_chat_stream(
         try:
             llm = create_llm(model_name=candidate, temperature=effective_temp,
                              max_tokens=degrade["max_tokens"], streaming=True)
+            today = datetime.now().strftime("%Y年%m月%d日 %A")
+            date_note = f"今天是 {today}。"
             messages = format_messages(history)
-            messages.insert(0, SystemMessage(content=rag_system))
+            messages.insert(0, SystemMessage(content=f"{date_note}\n{rag_system}"))
             if image_url:
                 messages.append(HumanMessage(content=build_multimodal_content(query, image_url)))
             else:
