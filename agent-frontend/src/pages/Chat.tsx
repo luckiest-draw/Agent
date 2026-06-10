@@ -1,13 +1,22 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAppStore } from '@/store/appStore'
-import { Send, Bot, User } from 'lucide-react'
+import { Send, Bot, User, Plus, MessageSquare } from 'lucide-react'
 import ImageUploader, { type ImageInfo } from '@/components/chat/ImageUploader'
 import AudioRecorder from '@/components/chat/AudioRecorder'
+import { api } from '@/api/client'
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
   imageUrl?: string
+  toolCalls?: number
+}
+
+interface ConvInfo {
+  id: number
+  title: string
+  messageCount: number
+  updatedAt?: string
 }
 
 export default function Chat() {
@@ -16,9 +25,42 @@ export default function Chat() {
   const [streaming, setStreaming] = useState(false)
   const [conversationId, setConversationId] = useState<number | null>(null)
   const [images, setImages] = useState<ImageInfo[]>([])
+  const [conversations, setConversations] = useState<ConvInfo[]>([])
   const [showImageViewer, setShowImageViewer] = useState<string | null>(null)
   const selectedModel = useAppStore((s) => s.selectedModel)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // 加载会话列表
+  const loadConversations = async () => {
+    try {
+      const list = await api.listConversations()
+      if (list) setConversations(list)
+    } catch {}
+  }
+  useEffect(() => { loadConversations() }, [])
+
+  // 新建会话
+  const startNewChat = () => {
+    setConversationId(null)
+    setMessages([])
+    setInput('')
+    setImages([])
+  }
+
+  // 选择已有会话
+  const selectConversation = async (id: number) => {
+    setConversationId(id)
+    try {
+      const msgs = await api.getMessages(id)
+      if (msgs) {
+        setMessages(msgs.map((m: { role: string; content: string; imageUrl?: string }) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          imageUrl: m.imageUrl,
+        })))
+      }
+    } catch {}
+  }
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -120,6 +162,7 @@ export default function Chat() {
       console.error('Stream error:', err)
     } finally {
       setStreaming(false)
+      loadConversations()  // 刷新会话列表
     }
   }
 
@@ -128,8 +171,42 @@ export default function Chat() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)] max-w-3xl mx-auto">
-      <div className="mb-4">
+    <div className="flex h-[calc(100vh-7rem)] gap-0">
+      {/* 会话列表侧边栏 */}
+      <div className="w-64 border-r border-border flex flex-col shrink-0">
+        <button
+          onClick={startNewChat}
+          className="flex items-center gap-2 m-3 px-3 py-2 rounded-lg border border-border hover:bg-accent text-sm transition-colors"
+        >
+          <Plus className="w-4 h-4" /> 新对话
+        </button>
+        <div className="flex-1 overflow-auto px-2">
+          {conversations.length === 0 && (
+            <p className="text-xs text-muted-foreground px-2 py-4">暂无历史会话</p>
+          )}
+          {conversations.map(conv => (
+            <button
+              key={conv.id}
+              onClick={() => selectConversation(conv.id)}
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm mb-1 truncate transition-colors ${
+                conv.id === conversationId
+                  ? 'bg-primary/10 text-primary'
+                  : 'hover:bg-accent'
+              }`}
+            >
+              <MessageSquare className="w-3 h-3 inline mr-2 opacity-50" />
+              {conv.title || '(无标题)'}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground px-3 py-2 border-t border-border">
+          Model: {selectedModel}
+        </p>
+      </div>
+
+      {/* 主聊天区 */}
+      <div className="flex flex-col flex-1 max-w-3xl mx-auto w-full px-4">
+      <div className="mb-4 shrink-0">
         <h1 className="text-2xl font-bold">Chat</h1>
         <p className="text-muted-foreground text-sm">Model: {selectedModel}</p>
       </div>
@@ -217,6 +294,7 @@ export default function Chat() {
           />
         </div>
       )}
+      </div>
     </div>
   )
 }

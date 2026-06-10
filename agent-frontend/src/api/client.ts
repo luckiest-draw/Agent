@@ -39,6 +39,11 @@ export const api = {
   login: (username: string, password: string) =>
     api.post<{ token: string; user: unknown }>('/auth/login', { username, password }),
 
+  // Conversations
+  listConversations: () => api.get<{ id: number; title: string; messageCount: number; updatedAt: string }[]>('/conversations'),
+  getMessages: (convId: number) => api.get<{ id: number; role: string; content: string; imageUrl?: string; createdAt: string }[]>(`/conversations/${convId}/messages`),
+  createConversation: (title: string) => api.post<{ id: number; title: string }>('/conversations', { title }),
+
   // Chat
   chatStream: (query: string, history: unknown[], model?: string) =>
     fetch(`${BASE_URL}/conversations/stream`, {
